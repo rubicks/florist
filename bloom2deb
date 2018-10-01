@@ -124,6 +124,7 @@ if ! command -v gpg; then
     apt-get -y --no-install-recommends install gnupg
 fi
 find /var/lib/apt/lists -type f -print -delete
+${HERE}/configure-apt ${DISTRIBUTION}
 
 apt-get -y update
 apt-get -y --no-install-recommends install \
@@ -138,7 +139,11 @@ apt-get -y --no-install-recommends install \
     xz-utils \
     && true
 
-mk-build-deps -irt "apt-get -y --no-install-recommends" "${RELEASE_DIR}/debian/control"
+mk-build-deps \
+    --install \
+    --remove \
+    --tool "apt-get -y --no-install-recommends -o Debug::pkgProblemResolver=true" \
+    "${RELEASE_DIR}/debian/control"
 
 readonly luser_home="$(mktemp -d --suffix=.luser.home)"
 groupadd -g "${DOCKER_HOST_GID}" luser
