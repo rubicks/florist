@@ -1,0 +1,480 @@
+#!/bin/sh
+
+# florist/upstream2bloom
+
+set -euvx
+
+readonly this="$(readlink -f "$0")"
+readonly here="$(dirname "${this}")"
+readonly default_ros_distro="kinetic"
+readonly default_upstream_treeish="HEAD"
+
+log() { echo "$@" >&2; }
+inform() { log "INFO: $@"; }
+warn() { log "WARNING: $@"; }
+error() { log "ERROR: $@"; }
+
+usage() {
+    cat <<EOF
+Usage: $(basename ${this}) [OPTION]... UPSTREAM_URI
+Bloom the given UPSTREAM_URI into local bare git repository.
+
+Options
+    -h                          print this usage and return success
+    -C RELEASE_BARE             bloom into RELEASE_BARE (default: \$(basename -s .git \${UPSTREAM_URI})-release.git)
+    -R ROS_DISTRO               bloom for ROS_DISTRO (default: ${default_ros_distro})
+    -b UPSTREAM_DEVEL_BRANCH    upstream devel branch (default: \${ROS_DISTRO}-devel)
+    -t UPSTREAM_TREEISH         git treeish (on devel branch) to bloom (default: ${default_upstream_treeish})
+
+Examples:
+
+    \$ ./$(basename ${this}) -b demo-dev-vision git@github.com:RealtimeRobotics/rapidplan.git
+
+    \$ ./$(basename ${this}) -b demo-dev-vision -t HEAD git@github.com:RealtimeRobotics/rapidplan.git
+
+    \$ ./$(basename ${this}) -b demo-dev-vision -t HEAD -R kinetic git@github.com:RealtimeRobotics/rapidplan.git
+
+EOF
+}
+
+die() {
+    error "$@"
+    usage >&2
+    exit 1
+}
+
+cleanup() {
+    status="$?"
+    if command -v docker; then
+        docker system prune --force --filter until=6h || true
+    fi
+    return "${status}"
+}
+
+ends_with() { [ "${1}" != "${1%${2}}" ]; }
+
+# * it must only consist of alphanumerics and _ separators. Other symbols might
+#   not be supported by some OSes (e.g. unicode characters) or would make it
+#   hard to follow OSes conventions
+#
+# * they must be at least two characters long and must start with an alphabetic
+#   character. This rule is simply to force the name of the package to be more
+#   human understandable.
+#
+# -- http://www.ros.org/reps/rep-0144.html#mandatory-rules
+is_good_package_name() { echo "$1" | grep -Eq '^[[:alpha:]][[:alnum:]_]+$'; }
+
+# $1 : bare git repository
+# $2 : destination directory
+# rest : git clone args
+safe_git_clone() {
+    src="$1"
+    dst="$2"
+    shift 2
+    if [ -d "${dst}" ]; then
+        warn "exists: ${dst}"
+    else
+        mkdir -vp "${dst}"
+    fi
+    if git clone $@ "${src}" "${dst}"; then
+        return 0
+    fi
+    warn "failure: git clone $@ ${src} ${dst}"
+    if ! extant_remote="$(git -C ${dst} config --get remote.origin.url)"; then
+        error "failure: git -C ${dst} config --get remote.origin.url"
+        return 1
+    fi
+    if ! [ "${src}" = "${extant_remote}" ]; then
+        error "bad remote: need ${src}, have ${extant_remote}"
+        return 1
+    fi
+    if ! git -C "${dst}" fetch --verbose --all; then
+        error "failure: git -C ${dst} --verbose --fetch"
+        return 1
+    fi
+    warn "will use existing clone"
+    return 0
+}
+
+is_sha1() { echo "$1" | grep -Eq "^[[:xdigit:]]{40}$"; }
+
+# $1 : upstream_bare
+# $2 : upstream_devel_branch
+# $3 : upstream_treeish
+hashify() {
+    (
+        cd "$(mktemp -d)"
+        git clone "$1" .
+        if is_sha1 "$3"; then
+            if ! git log --pretty=oneline "remotes/origin/$2" | grep -Eq "^$3 "; then
+                die "branch origin/$2 missing hash $3"
+            fi
+            echo "$3"
+        elif [ "HEAD" = "$3" ]; then
+            git rev-parse "remotes/origin/$2"
+        else
+            git rev-parse "$3"
+        fi
+    )
+}
+
+run_raw() {
+    git config --global user.email "${GIT_CONFIG_USER_EMAIL}"
+    git config --global user.name "${GIT_CONFIG_USER_NAME}"
+    bloom-release --version
+
+    # `bloom-release` is stupid because it forces interactivity by reading from
+    # the terminal device instead of stdin. To defeat this, we need to fight
+    # stupid with stupid: use `expect` to fake the interactive terminal. If you
+    # know a better way to force bloom-release to run non-interactively, I
+    # encourage you to re-write this horror.
+    #
+    # -- nroza 2018.07.31
+    export fake_version
+    export package_name
+    export release_bare
+    export ros_distro
+    export upstream_bare
+    export upstream_devel_branch
+    export upstream_sha1
+    readonly expect_script="$(mktemp)"
+    envsubst >"${expect_script}" <<'EOF'
+set timeout 30
+
+spawn \
+  bloom-release \
+    --debug \
+    --new-track \
+    --no-web \
+    --override-release-repository-url ${release_bare} \
+    --rosdistro ${ros_distro} \
+    --track ${ros_distro} \
+    ${package_name}
+
+match_max 500
+
+while 1 {
+  expect {
+    timeout {
+      send_user "\nERROR: TIMEOUT\n"
+      exit 1
+    }
+
+    -ex "Release repository url \[press enter to abort\]: " {
+      sleep 1
+      send -- "file://${release_bare}\r"
+    }
+
+    -ex "\[1mCreate a new track called '${ros_distro}' now \[33m\[Y/n\]? \[0m\[0m" {
+      sleep 1
+      send -- "Y\r"
+    }
+
+    -ex "\[4mRepository Name:\[0m\[0m\r" {
+      sleep 1
+      send -- "${package_name}\r"
+    }
+
+    -ex "\[4mUpstream Repository URI:\[0m\[0m\r" {
+      sleep 1
+      send -- "file://${upstream_bare}\r"
+    }
+
+    -ex "\[4mUpstream VCS Type:\[0m\[0m\r" {
+      sleep 1
+      send -- "git\r"
+    }
+
+    -ex "\[4mVersion:\[0m\[0m\r" {
+      sleep 1
+      send -- "${fake_version}\r"
+    }
+
+    -ex "\[4mRelease Tag:\[0m\[0m\r" {
+      sleep 1
+      send -- "${upstream_sha1}\r"
+    }
+
+    -ex "\[4mUpstream Devel Branch:\[0m\[0m\r" {
+      sleep 1
+      send -- "${upstream_devel_branch}\r"
+    }
+
+    -ex "\[4mROS Distro:\[0m\[0m\r" {
+      sleep 1
+      send -- "${ros_distro}\r"
+    }
+
+    -ex "\[4mPatches Directory:\[0m\[0m\r" {
+      sleep 1
+      send -- ":{none}\r"
+    }
+
+    -ex "\[4mRelease Repository Push URL:\[0m\[0m\r" {
+      sleep 1
+      send -- ":{none}\r"
+      break
+    }
+  }
+}
+
+# Blooming sometimes takes an obscene amount of time.
+#
+# * kinetic orocos_kdl: 2 minutes
+# * kinetic ros_comm: 9 minutes
+# * kinetic sns_ik: 4 minutes
+# * melodic intera: 45+ minutes (failed)
+#
+# allow one hour -- nroza 2018.08.16
+set timeout 3600
+
+expect {
+  timeout {
+    send_user "\nERROR: TIMEOUT\n"
+    exit 1
+  }
+
+  -ex "\u001b\[32m<== \u001b\[0m\u001b\[0mReleased '${package_name}' using release track '${ros_distro}' successfully\u001b\[0m\r" {
+    send_user "\nSUCCESS\n"
+  }
+}
+
+set timeout 20
+
+while 1 {
+  expect {
+    timeout {
+      send_user "\nERROR: TIMEOUT\n"
+      exit 1
+    }
+
+    -ex "Continue \[33m\[Y/n\]? \[0m\[0m" {
+      sleep 1
+      send -- "Y\r"
+    }
+
+    -ex "Would you like to add documentation information for this repository? \[33m\[Y/n\]? \[0m\[0m" {
+      sleep 1
+      send -- "n\r"
+    }
+
+    -ex "Would you like to add source information for this repository? \[33m\[Y/n\]? \[0m\[0m" {
+      sleep 1
+      send -- "n\r"
+    }
+
+    -ex "Would you like to add a maintenance status for this repository? \[33m\[Y/n\]? \[0m\[0m" {
+      sleep 1
+      send -- "n\r"
+    }
+
+    -ex "Would you like to create an OAuth token now \[33m\[Y/n\]? \[0m\[0m" {
+      sleep 1
+      send -- "n\r"
+    }
+
+    eof {
+      exit 0
+    }
+  }
+}
+EOF
+    expect <"${expect_script}"
+}
+
+run_dockerized() {
+    readonly image_name="rubicks/bloomer"
+    if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ]; then
+        docker image pull "${image_name}"
+    else
+        warn "skipping: docker image pull ${image_name}"
+    fi
+
+    # How to SSH agent forward into a docker container
+    # https://gist.github.com/d11wtq/8699521
+    #
+    # work around undefined SSH_AUTH_SOCK
+    if [ -S "${SSH_AUTH_SOCK:-}" ]; then
+        readonly keyring_dir="$(dirname ${SSH_AUTH_SOCK})"
+    else
+        readonly keyring_dir="$(mktemp -dt fake-keyring-XXXXXX)"
+    fi
+
+    readonly workdir="$(mktemp -ut workdir.XXXXXX)"
+    readonly luser_home="$(mktemp -ut luser.home.XXXXXX)"
+    docker container run \
+        --dns 8.8.4.4 \
+        --dns 8.8.8.8 \
+        --env DOCKER_HOST_GID="$(id -g)" \
+        --env DOCKER_HOST_UID="$(id -u)" \
+        --env FAKE_VERSION="${fake_version}" \
+        --env GIT_CONFIG_USER_EMAIL="$(git config user.email)" \
+        --env GIT_CONFIG_USER_NAME="$(git config user.name)" \
+        --env HERE="${here}" \
+        --env LUSER_HOME="${luser_home}" \
+        --env RELEASE_BARE="${release_bare}" \
+        --env ROS_DISTRO="${ros_distro}" \
+        --env SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+        --env THIS="${this}" \
+        --env UPSTREAM_BARE="${upstream_bare}" \
+        --env UPSTREAM_DEVEL_BRANCH="${upstream_devel_branch}" \
+        --env UPSTREAM_TREEISH="${upstream_treeish}" \
+        --env UPSTREAM_URI="${upstream_uri}" \
+        --interactive \
+        --mount type=bind,source="${HOME}/.ssh",target="${luser_home}/.ssh",readonly \
+        --mount type=bind,source="${PWD}",target="${workdir}" \
+        --mount type=bind,source="${here}",target="${here}",readonly \
+        --mount type=bind,source="${keyring_dir}",target="${keyring_dir}" \
+        --mount type=bind,source="${release_bare}",target="${release_bare}" \
+        --mount type=bind,source="${upstream_bare}",target="${upstream_bare}",readonly \
+        --mount type=bind,source=/usr/local/share/ca-certificates,target=/usr/local/share/ca-certificates,readonly \
+        --rm \
+        --workdir="${workdir}" \
+        "${image_name}" \
+        sh <<'EOF'
+set -euvx
+
+update-ca-certificates
+
+# "The authenticity of host [REDACTED] can't be established."
+cat >>/etc/ssh/ssh_config <<'SSH_CONFIG'
+Host *
+  StrictHostKeyChecking no
+SSH_CONFIG
+
+groupadd -g "${DOCKER_HOST_GID}" luser
+useradd \
+    --uid "${DOCKER_HOST_UID}" \
+    --gid "${DOCKER_HOST_GID}" \
+    --home "${LUSER_HOME}" \
+    --shell $(command -v sh) \
+    luser
+find "${LUSER_HOME}" \
+    ! \( -user ${DOCKER_HOST_UID} -group ${DOCKER_HOST_GID} \) \
+    -exec chown -v ${DOCKER_HOST_UID}:${DOCKER_HOST_GID} {} +
+env | sort
+su luser - <<EOSU
+${THIS} -r -C ${RELEASE_BARE} -R ${ROS_DISTRO} -b ${UPSTREAM_DEVEL_BRANCH} -t ${UPSTREAM_TREEISH} ${UPSTREAM_URI}
+EOSU
+EOF
+}
+
+#############################
+# ######################### #
+# # REAL WORK STARTS HERE # #
+# ######################### #
+#############################
+
+trap cleanup EXIT
+
+while getopts ":hrC:R:b:t:" opt; do
+    case "${opt}" in
+        h)
+            usage
+            exit "$?"
+            ;;
+        r) readonly run_raw="true" ;;
+        C)
+            if ! [ -d "$(readlink -f "${OPTARG}")" ]; then
+                die "not a directory: ${OPTARG}"
+            fi
+            readonly release_bare="$(readlink -f "${OPTARG}")"
+            ;;
+        R) readonly ros_distro="${OPTARG}" ;;
+        b) readonly upstream_devel_branch="${OPTARG}" ;;
+        t) readonly upstream_treeish="${OPTARG}" ;;
+        :) die "Missing argument: -${OPTARG}" ;;
+        \?) die "Invalid option: -${OPTARG}" ;;
+    esac
+done
+shift "$((${OPTIND} - 1))"
+
+####################
+# BLOOM ARGS BEGIN #
+####################
+[ 1 -eq "$#" ] || die "bad args"
+readonly upstream_uri="$1"
+ends_with "${upstream_uri}" '.git' || die "missing .git suffix: ${upstream_uri}"
+
+readonly package_name="$(basename "$1" .git)"
+if is_good_package_name "${package_name}"; then
+    inform "good package_name: ${package_name}"
+else
+    die "bad package name: ${package_name}"
+fi
+
+readonly upstream_bare="${PWD}/${package_name}.git"
+safe_git_clone "${upstream_uri}" "${upstream_bare}" --mirror
+
+if [ -n "${ros_distro:-}" ]; then
+    inform "ros_distro: ${ros_distro}"
+else
+    readonly ros_distro="${default_ros_distro}"
+    warn "defaulting ros_distro: ${ros_distro}"
+fi
+
+if [ -n "${upstream_devel_branch:-}" ]; then
+    inform "upstream_devel_branch: ${upstream_devel_branch}"
+else
+    readonly upstream_devel_branch="${default_ros_distro}-devel"
+    warn "defaulting upstream_devel_branch: ${upstream_devel_branch}"
+fi
+
+if [ -n "${upstream_treeish:-}" ]; then
+    inform "upstream_treeish: ${upstream_treeish}"
+else
+    readonly upstream_treeish="${default_upstream_treeish}"
+    warn "defaulting upstream_treeish: ${upstream_treeish}"
+fi
+
+if [ -n "${release_bare:-}" ]; then
+    inform "release_bare: ${release_bare}"
+else
+    readonly release_bare="${PWD}/${package_name}-release.git"
+    warn "defaulting release_bare: ${release_bare}"
+    warn "$(git init --bare "${release_bare}")"
+fi
+##################
+# BLOOM ARGS END #
+##################
+
+if ! upstream_sha1="$(hashify "${upstream_bare}" "${upstream_devel_branch}" "${upstream_treeish}")"; then
+    die "failure: hashify ${upstream_bare} ${upstream_devel_branch} ${upstream_treeish}"
+fi
+readonly upstream_sha1="${upstream_sha1}"
+
+# Print the upstream_sha1's most recent tag, assumed to be an
+# almost-ROS-friendly version string:
+#
+# > it must be formatted as 'MAJOR.MINOR.PATCH'
+# -- `bloom-release` error message
+#
+# This is the LIE we tell bloom to get it to construct the release from the
+# upstream. Later, when we actually build and package the release, we need to
+# twiddle the `debian/changelog` to force the version string we actually want.
+#
+# e.g., a fake_version "1.11.8" for new_version "1.11.8-10-ge9bf8dc"
+if ! git_describe="$(git -C "${upstream_bare}" describe --tags --abbrev=0 "${upstream_sha1}")"; then
+    die "failure: git -C ${upstream_bare} describe --tags --abbrev=0 ${upstream_sha1}"
+fi
+if ! fake_version="$(echo "${git_describe}" | grep -Eo '[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+')"; then
+    die "tag missing dotted-triplet: ${git_describe}"
+fi
+readonly fake_version="${fake_version}"
+
+if [ "true" = "${run_raw:-false}" ]; then
+    run_raw
+else
+    run_dockerized
+fi
+
+inform "SUCCESS: BLOOMED ${upstream_bare}"
+inform "fake_version          : ${fake_version}"
+inform "release_bare          : ${release_bare}"
+inform "ros_distro            : ${ros_distro}"
+inform "upstream_devel_branch : ${upstream_devel_branch}"
+inform "upstream_sha1         : ${upstream_sha1}"
+inform "upstream_treeish      : ${upstream_treeish}"
+inform "upstream_uri          : ${upstream_uri}"
+
+exit "$?"

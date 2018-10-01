@@ -1,0 +1,13 @@
+*.a
+*.build
+*.bz2
+*.changes
+*.deb
+*.dsc
+*.git
+*.gz
+*.la
+*.lo
+*.o
+*.xz
+*~

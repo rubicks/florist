@@ -1,0 +1,277 @@
+#!/bin/sh
+
+# florist/upstream2deb
+
+set -euvx
+
+readonly this="$(readlink -f "$0")"
+readonly here="$(dirname "${this}")"
+readonly default_distribution="xenial"
+readonly default_ros_distro="kinetic"
+readonly default_upstream_treeish="HEAD"
+
+log() { echo "$@" >&2; }
+inform() { log "INFO: $@"; }
+warn() { log "WARNING: $@"; }
+error() { log "ERROR: $@"; }
+
+usage() {
+    cat <<EOF
+Usage: $(basename ${this}) [OPTION]... UPSTREAM_URI
+Bloom, build, and package the given UPSTREAM_URI.
+
+Options
+    -h                          print this usage and return success
+    -C RELEASE_BARE             bloom into RELEASE_BARE (default: \$(basename -s .git \${UPSTREAM_URI})-release.git)
+    -R ROS_DISTRO               bloom for ROS_DISTRO (default: ${default_ros_distro})
+    -b UPSTREAM_DEVEL_BRANCH    upstream devel branch (default: \${ROS_DISTRO}-devel)
+    -t UPSTREAM_TREEISH         git treeish (on devel branch) to bloom (default: ${default_upstream_treeish})
+    -D DISTRIBUTION             ubuntu distribution codename (default: ${default_distribution})
+    -V NEW_VERSION              override the bloom-release version
+
+Examples:
+
+    \$ ./$(basename ${this}) -b demo-dev-vision git@github.com:RealtimeRobotics/rapidplan.git
+
+    \$ ./$(basename ${this}) -b demo-dev-vision -t HEAD git@github.com:RealtimeRobotics/rapidplan.git
+
+    \$ ./$(basename ${this}) -b demo-dev-vision -t HEAD -R kinetic git@github.com:RealtimeRobotics/rapidplan.git
+
+EOF
+}
+
+die() {
+    error "$@"
+    usage >&2
+    exit 1
+}
+
+cleanup() {
+    status="$?"
+    if command -v docker; then
+        docker system prune --force --filter until=6h || true
+    fi
+    return "${status}"
+}
+
+ends_with() { [ "${1}" != "${1%${2}}" ]; }
+
+# * it must only consist of alphanumerics and _ separators. Other symbols might
+#   not be supported by some OSes (e.g. unicode characters) or would make it
+#   hard to follow OSes conventions
+#
+# * they must be at least two characters long and must start with an alphabetic
+#   character. This rule is simply to force the name of the package to be more
+#   human understandable.
+#
+# -- http://www.ros.org/reps/rep-0144.html#mandatory-rules
+is_good_package_name() { echo "$1" | grep -Eq '^[[:alpha:]][[:alnum:]_]+$'; }
+
+# $1 : bare git repository
+# $2 : destination directory
+# rest : git clone args
+safe_git_clone() {
+    src="$1"
+    dst="$2"
+    shift 2
+    if [ -d "${dst}" ]; then
+        warn "exists: ${dst}"
+    else
+        mkdir -vp "${dst}"
+    fi
+    if git clone $@ "${src}" "${dst}"; then
+        return 0
+    fi
+    warn "failure: git clone $@ ${src} ${dst}"
+    if ! extant_remote="$(git -C ${dst} config --get remote.origin.url)"; then
+        error "failure: git -C ${dst} config --get remote.origin.url"
+        return 1
+    fi
+    if ! [ "${src}" = "${extant_remote}" ]; then
+        error "bad remote: need ${src}, have ${extant_remote}"
+        return 1
+    fi
+    if ! git -C "${dst}" fetch --verbose --all; then
+        error "failure: git -C ${dst} --verbose --fetch"
+        return 1
+    fi
+    warn "will use existing clone"
+    return 0
+}
+
+is_sha1() { echo "$1" | grep -Eq "^[[:xdigit:]]{40}$"; }
+
+# $1 : upstream_bare
+# $2 : upstream_devel_branch
+# $3 : upstream_treeish
+hashify() {
+    (
+        cd "$(mktemp -d)"
+        git clone "$1" .
+        if is_sha1 "$3"; then
+            if ! git log --pretty=oneline "remotes/origin/$2" | grep -Eq "^$3 "; then
+                die "branch origin/$2 missing hash $3"
+            fi
+            echo "$3"
+        elif [ "HEAD" = "$3" ]; then
+            git rev-parse "remotes/origin/$2"
+        else
+            git rev-parse "$3"
+        fi
+    )
+}
+
+#############################
+# ######################### #
+# # REAL WORK STARTS HERE # #
+# ######################### #
+#############################
+
+trap cleanup EXIT
+
+while getopts ":hrC:R:b:t:D:V:" opt; do
+    case "${opt}" in
+        h)
+            usage
+            exit "$?"
+            ;;
+        r) readonly run_raw="true" ;;
+        C)
+            if ! [ -d "$(readlink -f "${OPTARG}")" ]; then
+                die "not a directory: ${OPTARG}"
+            fi
+            readonly release_bare="$(readlink -f "${OPTARG}")"
+            ;;
+        R) readonly ros_distro="${OPTARG}" ;;
+        b) readonly upstream_devel_branch="${OPTARG}" ;;
+        t) readonly upstream_treeish="${OPTARG}" ;;
+        D) readonly distribution="${OPTARG}" ;;
+        V) readonly new_version="${OPTARG}" ;;
+        :) die "Missing argument: -${OPTARG}" ;;
+        \?) die "Invalid option: -${OPTARG}" ;;
+    esac
+done
+shift "$((${OPTIND} - 1))"
+
+####################
+# BLOOM ARGS BEGIN #
+####################
+[ 1 -eq "$#" ] || die "bad args"
+readonly upstream_uri="$1"
+ends_with "${upstream_uri}" '.git' || die "missing .git suffix: ${upstream_uri}"
+
+readonly package_name="$(basename "$1" .git)"
+if is_good_package_name "${package_name}"; then
+    inform "good package_name: ${package_name}"
+else
+    die "bad package name: ${package_name}"
+fi
+
+readonly upstream_bare="${PWD}/${package_name}.git"
+safe_git_clone "${upstream_uri}" "${upstream_bare}" --bare
+
+if [ -n "${ros_distro:-}" ]; then
+    inform "ros_distro: ${ros_distro}"
+else
+    readonly ros_distro="${default_ros_distro}"
+    warn "defaulting ros_distro: ${ros_distro}"
+fi
+
+if [ -n "${upstream_devel_branch:-}" ]; then
+    inform "upstream_devel_branch: ${upstream_devel_branch}"
+else
+    readonly upstream_devel_branch="${default_ros_distro}-devel"
+    warn "defaulting upstream_devel_branch: ${upstream_devel_branch}"
+fi
+
+if [ -n "${upstream_treeish:-}" ]; then
+    inform "upstream_treeish: ${upstream_treeish}"
+else
+    readonly upstream_treeish="${default_upstream_treeish}"
+    warn "defaulting upstream_treeish: ${upstream_treeish}"
+fi
+
+if [ -n "${release_bare:-}" ]; then
+    inform "release_bare: ${release_bare}"
+else
+    readonly release_bare="${PWD}/${package_name}-release.git"
+    warn "defaulting release_bare: ${release_bare}"
+    warn "$(git init --bare "${release_bare}")"
+fi
+##################
+# BLOOM ARGS END #
+##################
+
+if ! upstream_sha1="$(hashify "${upstream_bare}" "${upstream_devel_branch}" "${upstream_treeish}")"; then
+    die "failure: hashify ${upstream_bare} ${upstream_devel_branch} ${upstream_treeish}"
+fi
+readonly upstream_sha1="${upstream_sha1}"
+
+if [ -n "${new_version:-}" ]; then
+    inform "new_version: ${new_version}"
+else
+    if ! new_version="$(git -C "${upstream_bare}" describe --long --tags "${upstream_sha1}")"; then
+        die "failure: git -C ${upstream_bare} describe --long --tags ${upstream_sha1}"
+    fi
+    if ! new_version="$(echo ${new_version} | grep -Eo '[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+-[[:digit:]]+-g[[:xdigit:]]{7}')"; then
+        die "failure: bad version string"
+    fi
+    readonly new_version="${new_version}"
+    if ! [ -n "${new_version}" ]; then
+        die "empty new_version"
+    fi
+    warn "defaulting new_version: ${new_version}"
+fi
+
+if [ -n "${distribution:-}" ]; then
+    inform "distribution: ${distribution}"
+else
+    readonly distribution="${default_distribution}"
+    warn "defaulting distribution: ${distribution}"
+fi
+
+"${here}/upstream2bloom" \
+    -C "${release_bare}" \
+    -R "${ros_distro}" \
+    -b "${upstream_devel_branch}" \
+    -t "${upstream_treeish}" \
+    "${upstream_uri}"
+
+readonly release_dir="${release_bare%.git}.dir"
+mkdir -vp "${release_dir}"
+safe_git_clone "${release_bare}" "${release_dir}"
+
+readonly branch_list="${release_dir%.dir}.branch.list"
+git -C "${release_dir}" branch -a >"${branch_list}"
+cat "${branch_list}"
+
+# > [a package name] must only consist of alphanumerics and _ separators
+#
+# -- http://www.ros.org/reps/rep-0144.html#mandatory-rules
+sed -nri "s|^  remotes/origin/(debian/${ros_distro}/${distribution}/[[:alnum:]_]+)$|\1|gp" "${branch_list}"
+cat "${branch_list}"
+
+# # uncomment this to avoid "*_example" subprojects
+# sed -ri '/.*_examples$/d' "${branch_list}"
+# cat "${branch_list}"
+
+LC_ALL=C sort -uo "${branch_list}" "${branch_list}"
+cat "${branch_list}"
+
+while read branch_name; do
+    git -C "${release_dir}" checkout "${branch_name}"
+    # this is where we override the bloom-release version
+    "${here}/bloom2deb" -C "${release_dir}" -V "${new_version}"
+    inform "SUCCESS: BUILT branch ${branch_name}, version ${new_version}"
+done <"${branch_list}"
+
+inform "SUCCESS: PACKAGED ${upstream_bare}"
+inform "new_version           : ${new_version}"
+inform "release_bare          : ${release_bare}"
+inform "ros_distro            : ${ros_distro}"
+inform "upstream_devel_branch : ${upstream_devel_branch}"
+inform "upstream_sha1         : ${upstream_sha1}"
+inform "upstream_treeish      : ${upstream_treeish}"
+inform "upstream_uri          : ${upstream_uri}"
+
+exit "$?"
