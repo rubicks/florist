@@ -248,7 +248,9 @@ cat "${branch_list}"
 # > [a package name] must only consist of alphanumerics and _ separators
 #
 # -- http://www.ros.org/reps/rep-0144.html#mandatory-rules
-sed -nri "s|^  remotes/origin/(debian/${ros_distro}/${distribution}/[[:alnum:]_]+)$|\1|gp" "${branch_list}"
+#
+# ..._*BUT*_ catkin will happily build packages with hyphens, too.
+sed -nri "s|^  remotes/origin/(debian/${ros_distro}/${distribution}/[[:alnum:]_-]+)$|\1|gp" "${branch_list}"
 cat "${branch_list}"
 
 # # uncomment this to avoid "*_example" subprojects

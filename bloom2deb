@@ -205,7 +205,7 @@ if ! [ -n "${release_branch}" ]; then
     die "empty release_branch"
 fi
 
-if ! echo "${release_branch}" | grep -E '^debian(/[[:alnum:]_]+){3}$'; then
+if ! echo "${release_branch}" | grep -E '^debian(/[[:alnum:]_-]+){3}$'; then
     die "bad release_branch: ${release_branch}"
 fi
 
