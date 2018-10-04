@@ -129,6 +129,7 @@ ${HERE}/configure-apt ${DISTRIBUTION}
 apt-get -y update
 apt-get -y --no-install-recommends install \
     devscripts \
+    dpkg-dev \
     equivs \
     fakeroot \
     git \
@@ -139,6 +140,27 @@ apt-get -y --no-install-recommends install \
     xz-utils \
     && true
 
+# From any/all debian package files within the current working directory,
+# create a temporary local apt repository
+
+dpkg-scanpackages --multiversion . >Packages
+cat >/etc/apt/sources.list.d/workdir.list <<WORKDIR_LIST
+deb [trusted=yes] file://${PWD} ./
+WORKDIR_LIST
+
+# Work around the following APT issue by using "Acquire::GzipIndexes=false":
+#
+# Err:3 file:/tmp/tmp.nKz7UlX66y.workdir ./ Packages Could not open file
+# /var/lib/apt/lists/partial/_tmp_tmp.nKz7UlX66y.workdir_._Packages - open (13:
+# Permission denied)
+#
+# E: Failed to fetch
+# store:/var/lib/apt/lists/partial/_tmp_tmp.nKz7UlX66y.workdir_._Packages Could
+# not open file
+# /var/lib/apt/lists/partial/_tmp_tmp.nKz7UlX66y.workdir_._Packages - open (13:
+# Permission denied)
+apt-get -y -o Acquire::GzipIndexes=false update
+
 mk-build-deps \
     --install \
     --remove \
@@ -148,7 +170,7 @@ mk-build-deps \
 readonly luser_home="$(mktemp -d --suffix=.luser.home)"
 groupadd -g "${DOCKER_HOST_GID}" luser
 useradd -u "${DOCKER_HOST_UID}" -g "${DOCKER_HOST_GID}" -d "${luser_home}" luser
-chown -vR luser:luser "${luser_home}"
+chown -cR ${DOCKER_HOST_UID}:${DOCKER_HOST_GID} ${luser_home} ${PWD}
 su luser -c "${THIS} -r -C ${RELEASE_DIR} -V ${NEW_VERSION} -- ${BUILDPACKAGE_OPTS}"
 EOF
 }
