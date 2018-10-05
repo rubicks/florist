@@ -168,9 +168,6 @@ else
     die "bad package name: ${package_name}"
 fi
 
-readonly upstream_bare="${PWD}/${package_name}.git"
-safe_git_clone "${upstream_uri}" "${upstream_bare}" --bare
-
 if [ -n "${ros_distro:-}" ]; then
     inform "ros_distro: ${ros_distro}"
 else
@@ -202,6 +199,10 @@ fi
 ##################
 # BLOOM ARGS END #
 ##################
+
+# create local upstream mirror
+readonly upstream_bare="${PWD}/${package_name}.git"
+safe_git_clone "${upstream_uri}" "${upstream_bare}" --mirror
 
 # discover the upstream sha1
 if ! upstream_sha1="$(hashify "${upstream_bare}" "${upstream_devel_branch}" "${upstream_treeish}")"; then
