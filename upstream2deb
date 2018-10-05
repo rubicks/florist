@@ -92,7 +92,7 @@ safe_git_clone() {
         return 1
     fi
     if ! git -C "${dst}" fetch --verbose --all; then
-        error "failure: git -C ${dst} --verbose --fetch"
+        error "failure: git -C ${dst} fetch --verbose --all"
         return 1
     fi
     warn "will use existing clone"
@@ -128,6 +128,7 @@ hashify() {
 #############################
 
 trap cleanup EXIT
+export LC_ALL=C
 
 while getopts ":hrC:R:b:t:D:V:" opt; do
     case "${opt}" in
@@ -202,11 +203,51 @@ fi
 # BLOOM ARGS END #
 ##################
 
+# discover the upstream sha1
 if ! upstream_sha1="$(hashify "${upstream_bare}" "${upstream_devel_branch}" "${upstream_treeish}")"; then
     die "failure: hashify ${upstream_bare} ${upstream_devel_branch} ${upstream_treeish}"
 fi
 readonly upstream_sha1="${upstream_sha1}"
 
+# clone upstream, checkout upstream sha1
+readonly upstream_dir="${upstream_bare%.git}.dir"
+mkdir -vp "${upstream_dir}"
+safe_git_clone "${upstream_bare}" "${upstream_dir}"
+
+# enumerate package.xml files
+readonly package_xml_list="$(mktemp -t package.xml.list.XXXXXX)"
+find "${upstream_dir}" -type f -name 'package.xml' >"${package_xml_list}"
+sort -uo "${package_xml_list}" "${package_xml_list}"
+
+# enumerate package names (assume parent directory name)
+readonly package_list="$(mktemp -t package.list.XXXXXX)"
+xargs dirname <"${package_xml_list}" | xargs basename -a >"${package_list}"
+sort -uo "${package_list}" "${package_list}"
+
+# discover dependencies, construct dependency list
+readonly dependency_list="$(mktemp -t dependency.list.XXXXXX)"
+while read package_xml; do
+    this_pkg="$(basename "$(dirname "${package_xml}")")"
+    this_deps="$(mktemp -t "${this_pkg}.deps.XXXXXX")"
+    # from the package.xml, dump all dependencies
+    xpath -q \
+          -e '/package' \
+          -e 'build_depend|buildtool_depend|depend|doc_depend|exec_depend|test_depend' \
+          -e 'text()' \
+          "${package_xml}" >"${this_deps}"
+    sed -ri "s|^[[:space:]]+||g;s|[[:space:]]+$||g" "${this_deps}"
+    sort -uo "${this_deps}" "${this_deps}"
+    comm -12 "${this_deps}" "${package_list}" \
+         | xargs -I {} echo "${this_pkg} {}" >>"${dependency_list}"
+done <"${package_xml_list}"
+
+# from dependency list, create reverse-topologically sorted package list
+readonly topo_package_list="$(mktemp -t topo.package.list.XXXXXX)"
+tsort <"${dependency_list}" >"${topo_package_list}"
+readonly rev_topo_package_list="$(mktemp -t rev.topo.package.list.XXXXXX)"
+tac <"${topo_package_list}" >"${rev_topo_package_list}"
+
+# vet new_version
 if [ -n "${new_version:-}" ]; then
     inform "new_version: ${new_version}"
 else
@@ -223,6 +264,7 @@ else
     warn "defaulting new_version: ${new_version}"
 fi
 
+# vet distribution
 if [ -n "${distribution:-}" ]; then
     inform "distribution: ${distribution}"
 else
@@ -257,15 +299,16 @@ cat "${branch_list}"
 # sed -ri '/.*_examples$/d' "${branch_list}"
 # cat "${branch_list}"
 
-LC_ALL=C sort -uo "${branch_list}" "${branch_list}"
+sort -uo "${branch_list}" "${branch_list}"
 cat "${branch_list}"
 
-while read branch_name; do
+while read package; do
+    branch_name="$(grep -E "${package}\$" <"${branch_list}")"
     git -C "${release_dir}" checkout "${branch_name}"
     # this is where we override the bloom-release version
     "${here}/bloom2deb" -C "${release_dir}" -V "${new_version}"
     inform "SUCCESS: BUILT branch ${branch_name}, version ${new_version}"
-done <"${branch_list}"
+done <"${rev_topo_package_list}"
 
 inform "SUCCESS: PACKAGED ${upstream_bare}"
 inform "new_version           : ${new_version}"
