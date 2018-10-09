@@ -304,7 +304,9 @@ sort -uo "${branch_list}" "${branch_list}"
 cat "${branch_list}"
 
 while read package; do
-    branch_name="$(grep -E "${package}\$" <"${branch_list}")"
+    if ! branch_name="$(grep -E "${package}\$" <"${branch_list}")"; then
+        die "package missing branch: ${package}"
+    fi
     git -C "${release_dir}" checkout "${branch_name}"
     # this is where we override the bloom-release version
     "${here}/bloom2deb" -C "${release_dir}" -V "${new_version}"
