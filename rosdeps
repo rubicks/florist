@@ -67,10 +67,10 @@ run_raw() {
         this_deps="$(mktemp -t "${this_pkg}.deps.XXXXXX")"
         # from the package.xml, dump all dependencies
         xpath -q \
-              -e '/package' \
-              -e 'build_depend|buildtool_depend|depend|doc_depend|exec_depend|test_depend' \
-              -e 'text()' \
-              "${package_xml}" >"${this_deps}"
+            -e '/package' \
+            -e 'build_depend|buildtool_depend|depend|doc_depend|exec_depend|test_depend' \
+            -e 'text()' \
+            "${package_xml}" >"${this_deps}"
         sed -ri "s|^[[:space:]]+||g;s|[[:space:]]+$||g" "${this_deps}"
         sort -uo "${this_deps}" "${this_deps}"
         comm -12 "${this_deps}" "${package_list}" \
@@ -135,7 +135,7 @@ case "$#" in
         readonly catkin_ws="${PWD}"
         warn "defaulting catkin_ws: ${catkin_ws}"
         ;;
-    1) 
+    1)
         readonly catkin_ws="$1"
         inform "catkin_ws: ${catkin_ws}"
         ;;
