@@ -85,7 +85,7 @@ run_raw() {
 }
 
 run_dockerized() {
-    readonly image_name="ubuntu:${distribution}"
+    readonly image_name="ros:${ros_distro}-ros-base-${distribution}"
     if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ]; then
         docker image pull "${image_name}"
     else
