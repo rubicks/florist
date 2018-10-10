@@ -214,6 +214,7 @@ readonly upstream_sha1="${upstream_sha1}"
 readonly upstream_dir="${upstream_bare%.git}.dir"
 mkdir -vp "${upstream_dir}"
 safe_git_clone "${upstream_bare}" "${upstream_dir}"
+git -C "${upstream_dir}" checkout "${upstream_sha1}"
 
 # enumerate package.xml files
 readonly package_xml_list="$(mktemp -t package.xml.list.XXXXXX)"
