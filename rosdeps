@@ -114,7 +114,7 @@ EOF
 #############################
 
 trap cleanup EXIT
-export TMPDIR="$(mktemp -dt "$(basename "${this}").XXXXXX")"
+export TMPDIR="${tmpdir}"
 export LC_ALL=C
 
 while getopts ":rhC:" opt; do
