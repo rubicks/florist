@@ -119,8 +119,14 @@ hashify() {
 }
 
 run_raw() {
-    git config --global user.email "${GIT_CONFIG_USER_EMAIL}"
-    git config --global user.name "${GIT_CONFIG_USER_NAME}"
+    if ! git config user.name; then
+        git config user.name "id -un"
+        warning "defaulting git config user.name: $(git config user.name)"
+    fi
+    if ! git config user.email; then
+        git config user.email "$(id -un)@$(hostname)"
+        warning "defaulting git config user.email: $(git config user.email)"
+    fi
     bloom-release --version
 
     # `bloom-release` is stupid because it forces interactivity by reading from
