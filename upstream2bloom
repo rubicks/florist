@@ -119,13 +119,13 @@ hashify() {
 }
 
 run_raw() {
-    if ! git config user.name; then
-        git config user.name "id -un"
-        warning "defaulting git config user.name: $(git config user.name)"
+    if ! git config --global user.name; then
+        git config --global user.name "id -un"
+        warning "defaulting git config --global user.name: $(git config --global user.name)"
     fi
-    if ! git config user.email; then
-        git config user.email "$(id -un)@$(hostname)"
-        warning "defaulting git config user.email: $(git config user.email)"
+    if ! git config --global user.email; then
+        git config --global user.email "$(id -un)@$(hostname)"
+        warning "defaulting git config --global user.email: $(git config --global user.email)"
     fi
     bloom-release --version
 
