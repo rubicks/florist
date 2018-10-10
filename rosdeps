@@ -1,0 +1,153 @@
+#!/bin/sh
+
+# florist/rosdeps
+
+set -eu
+
+readonly this="$(readlink -f "$0")"
+readonly here="$(dirname "${this}")"
+readonly whatami="$(basename "${here}").$(basename "${this}")"
+readonly tmpdir="$(mktemp -dt "${whatami}.XXXXXX")"
+
+log() { echo "${whatami}[$$]: $@" >&2; }
+inform() { log "INFO: $@"; }
+warn() { log "WARNING: $@"; }
+error() { log "ERROR: $@"; }
+
+usage() {
+    cat <<EOF
+Usage: $(basename ${this}) [OPTION]... [CATKIN_WS]
+Within CATKIN_WS (default \$PWD), enumerate ros packages and print dependencies.
+
+Options
+    -h                 print this usage and return success
+    -C CATKIN_WS       run as if started in CATKIN_WS (default: \$PWD)
+
+Examples:
+
+    \$ ./$(basename ${this}) -C ~/code/rapidplan
+
+    \$ ./$(basename ${this}) -C ~/code/rapidplan -D xenial
+
+    \$ ./$(basename ${this}) -C ~/code/rapidplan -D xenial -R kinetic
+
+EOF
+}
+
+die() {
+    error "$@"
+    usage >&2
+    exit 1
+}
+
+cleanup() {
+    status="$?"
+    if command -v docker >&2; then
+        docker system prune --force --filter until=6h >&2 || true
+    fi
+    return "${status}"
+}
+
+run_raw() {
+    # enumerate package.xml files
+    readonly package_xml_list="$(mktemp -t package.xml.list.XXXXXX)"
+    find "${catkin_ws}" -type f -name 'package.xml' >"${package_xml_list}"
+    sort -uo "${package_xml_list}" "${package_xml_list}"
+
+    # enumerate package names (assume parent directory name)
+    readonly package_list="$(mktemp -t package.list.XXXXXX)"
+    xargs -I{} dirname {} <"${package_xml_list}" \
+        | xargs -I{} basename {} >"${package_list}"
+    sort -uo "${package_list}" "${package_list}"
+
+    # discover dependencies, construct dependency list
+    readonly dependency_list="$(mktemp -t dependency.list.XXXXXX)"
+    while read package_xml; do
+        this_pkg="$(basename "$(dirname "${package_xml}")")"
+        this_deps="$(mktemp -t "${this_pkg}.deps.XXXXXX")"
+        # from the package.xml, dump all dependencies
+        xpath -q \
+              -e '/package' \
+              -e 'build_depend|buildtool_depend|depend|doc_depend|exec_depend|test_depend' \
+              -e 'text()' \
+              "${package_xml}" >"${this_deps}"
+        sed -ri "s|^[[:space:]]+||g;s|[[:space:]]+$||g" "${this_deps}"
+        sort -uo "${this_deps}" "${this_deps}"
+        comm -12 "${this_deps}" "${package_list}" \
+            | xargs -I {} echo "${this_pkg} {}" >>"${dependency_list}"
+    done <"${package_xml_list}"
+    cat "${dependency_list}"
+}
+
+run_dockerized() {
+    readonly image_name="rubicks/bloomer"
+    if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ]; then
+        docker image pull "${image_name}"
+    else
+        warn "skipping: docker image pull ${image_name}"
+    fi
+
+    readonly workdir="$(mktemp -ut workdir.XXXXXX)"
+    docker container run \
+        --dns 8.8.4.4 \
+        --dns 8.8.8.8 \
+        --env DOCKER_HOST_GID="$(id -g)" \
+        --env DOCKER_HOST_UID="$(id -u)" \
+        --env HERE="${here}" \
+        --env THIS="${this}" \
+        --interactive \
+        --mount type=bind,source="${PWD}",target="${workdir}",readonly \
+        --mount type=bind,source="${here}",target="${here}",readonly \
+        --rm \
+        --workdir="${workdir}" \
+        "${image_name}" \
+        sh <<'EOF'
+set -eu
+nice ${THIS} -r ${PWD}
+EOF
+}
+
+#############################
+# ######################### #
+# # REAL WORK STARTS HERE # #
+# ######################### #
+#############################
+
+trap cleanup EXIT
+export TMPDIR="$(mktemp -dt "$(basename "${this}").XXXXXX")"
+export LC_ALL=C
+
+while getopts ":rhC:" opt; do
+    case "${opt}" in
+        r) readonly run_raw="true" ;;
+        h)
+            usage
+            exit "$?"
+            ;;
+        :) die "Missing argument: -${OPTARG}" ;;
+        \?) die "Invalid option: -${OPTARG}" ;;
+    esac
+done
+shift "$((${OPTIND} - 1))"
+
+case "$#" in
+    0)
+        readonly catkin_ws="${PWD}"
+        warn "defaulting catkin_ws: ${catkin_ws}"
+        ;;
+    1) 
+        readonly catkin_ws="$1"
+        inform "catkin_ws: ${catkin_ws}"
+        ;;
+    *)
+        die "bad args"
+        ;;
+esac
+
+if [ "true" = "${run_raw:-false}" ]; then
+    run_raw
+else
+    run_dockerized
+fi
+
+exit "$?"
