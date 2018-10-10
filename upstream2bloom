@@ -6,10 +6,13 @@ set -euvx
 
 readonly this="$(readlink -f "$0")"
 readonly here="$(dirname "${this}")"
+readonly whatami="$(basename "${here}").$(basename "${this}")"
+readonly tmpdir="$(mktemp -dt "${whatami}.XXXXXX")"
+
 readonly default_ros_distro="kinetic"
 readonly default_upstream_treeish="HEAD"
 
-log() { echo "$@" >&2; }
+log() { echo "${whatami}[$$]: $@" >&2; }
 inform() { log "INFO: $@"; }
 warn() { log "WARNING: $@"; }
 error() { log "ERROR: $@"; }
@@ -372,6 +375,8 @@ EOF
 #############################
 
 trap cleanup EXIT
+export TMPDIR="${tmpdir}"
+export LC_ALL=C
 
 while getopts ":hrC:R:b:t:" opt; do
     case "${opt}" in
