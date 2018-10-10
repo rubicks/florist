@@ -218,7 +218,7 @@ git -C "${upstream_dir}" checkout "${upstream_sha1}"
 
 # create dependency list
 readonly dependency_list="$(mktemp -t dependency.list.XXXXXX)"
-"${this}/rosdeps" "${upstream_dir}" >"${dependency_list}"
+"${here}/rosdeps" "${upstream_dir}" >"${dependency_list}"
 
 # from dependency list, create reverse-topologically sorted package list
 readonly topo_package_list="$(mktemp -t topo.package.list.XXXXXX)"
