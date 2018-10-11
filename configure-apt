@@ -4,10 +4,11 @@
 
 set -euvx
 
-readonly this="$(readlink -e "$0")"
+readonly this="$(readlink -f "$0")"
 readonly here="$(dirname "${this}")"
+readonly whatami="$(basename "${here}").$(basename "${this}")"
 
-log() { echo "$(basename "${this}") ($$) $@" >&2; }
+log() { echo "${whatami}[$$]: $@" >&2; }
 inform() { log "INFO: $@"; }
 warn() { log "WARNING: $@"; }
 error() { log "ERROR: $@"; }
