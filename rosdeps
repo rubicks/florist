@@ -83,28 +83,25 @@ run_raw() {
 run_dockerized() {
     readonly image_name="rubicks/bloomer"
     if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ]; then
-        docker image pull "${image_name}"
+        docker image pull "${image_name}" >&2
     else
         warn "skipping: docker image pull ${image_name}"
     fi
 
-    readonly workdir="$(mktemp -ut workdir.XXXXXX)"
     docker container run \
         --dns 8.8.4.4 \
         --dns 8.8.8.8 \
-        --env DOCKER_HOST_GID="$(id -g)" \
-        --env DOCKER_HOST_UID="$(id -u)" \
-        --env HERE="${here}" \
+        --env CATKIN_WS="${catkin_ws}" \
         --env THIS="${this}" \
         --interactive \
-        --mount type=bind,source="${PWD}",target="${workdir}",readonly \
-        --mount type=bind,source="${here}",target="${here}",readonly \
+        --mount type=bind,source="${catkin_ws}",target="${catkin_ws}",readonly \
+        --mount type=bind,source="${this}",target="${this}",readonly \
         --rm \
-        --workdir="${workdir}" \
+        --workdir="$(mktemp -ut workdir.XXXXXX)" \
         "${image_name}" \
         sh <<'EOF'
 set -eu
-nice ${THIS} -r ${PWD}
+nice ${THIS} -r ${CATKIN_WS}
 EOF
 }
 
