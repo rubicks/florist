@@ -42,6 +42,7 @@ die() {
 
 cleanup() {
     status="$?"
+    rm -rf "${tmpdir}"
     if command -v docker >&2; then
         docker system prune --force --filter until=6h >&2 || true
     fi
