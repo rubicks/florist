@@ -6,11 +6,14 @@ set -euvx
 
 readonly this="$(readlink -f "$0")"
 readonly here="$(dirname "${this}")"
+readonly whatami="$(basename "${here}").$(basename "${this}")"
+readonly tmpdir="$(mktemp -dt "${whatami}.XXXXXX")"
+
 readonly default_distribution="xenial"
 readonly default_ros_distro="kinetic"
 readonly default_upstream_treeish="HEAD"
 
-log() { echo "$@" >&2; }
+log() { echo "${whatami}[$$]: $@" >&2; }
 inform() { log "INFO: $@"; }
 warn() { log "WARNING: $@"; }
 error() { log "ERROR: $@"; }
@@ -48,8 +51,9 @@ die() {
 
 cleanup() {
     status="$?"
-    if command -v docker; then
-        docker system prune --force --filter until=6h || true
+    rm -rf "${tmpdir}"
+    if command -v docker >&2; then
+        docker system prune --force --filter until=6h >&2 || true
     fi
     return "${status}"
 }
@@ -128,6 +132,7 @@ hashify() {
 #############################
 
 trap cleanup EXIT
+export TMPDIR="${tmpdir}"
 export LC_ALL=C
 
 while getopts ":hrC:R:b:t:D:V:" opt; do
