@@ -221,15 +221,10 @@ mkdir -vp "${upstream_dir}"
 safe_git_clone "${upstream_bare}" "${upstream_dir}"
 git -C "${upstream_dir}" checkout "${upstream_sha1}"
 
-# create dependency list
-readonly dependency_list="$(mktemp -t dependency.list.XXXXXX)"
-"${here}/rosdeps" "${upstream_dir}" >"${dependency_list}"
-
-# from dependency list, create reverse-topologically sorted package list
-readonly topo_package_list="$(mktemp -t topo.package.list.XXXXXX)"
-tsort <"${dependency_list}" >"${topo_package_list}"
-readonly rev_topo_package_list="$(mktemp -t rev.topo.package.list.XXXXXX)"
-tac <"${topo_package_list}" >"${rev_topo_package_list}"
+# create dependency list, topo sort, and reverse topo sort
+"${here}/rosdeps" "${upstream_dir}" >rosdeps.out
+tsort <rosdeps.out >tsort.rosdeps.out
+tac <tsort.rosdeps.out >tac.tsort.rosdeps.out
 
 # vet new_version
 if [ -n "${new_version:-}" ]; then
@@ -288,13 +283,14 @@ cat "${branch_list}"
 
 while read package; do
     if ! branch_name="$(grep -E "${package}\$" <"${branch_list}")"; then
-        die "package missing branch: ${package}"
+        warn "package missing branch: ${package}"
+        continue
     fi
     git -C "${release_dir}" checkout "${branch_name}"
     # this is where we override the bloom-release version
     "${here}/bloom2deb" -C "${release_dir}" -V "${new_version}"
     inform "SUCCESS: BUILT branch ${branch_name}, version ${new_version}"
-done <"${rev_topo_package_list}"
+done <tac.tsort.rosdeps.out
 
 inform "SUCCESS: PACKAGED ${upstream_bare}"
 inform "new_version           : ${new_version}"
