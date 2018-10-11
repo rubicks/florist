@@ -121,14 +121,6 @@ run_dockerized() {
         sh <<'EOF'
 set -euvx
 
-if ! command -v gpg; then
-    echo "WARNING: missing program: gpg" >&2
-    apt-get -y update
-    apt-get -y --no-install-recommends install gnupg
-fi
-find /var/lib/apt/lists -type f -print -delete
-${HERE}/configure-apt ${DISTRIBUTION}
-
 apt-get -y update
 apt-get -y --no-install-recommends install \
     devscripts \
