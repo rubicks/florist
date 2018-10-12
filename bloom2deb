@@ -61,8 +61,10 @@ cleanup() {
 
 run_raw() {
     readonly oldpwd="${PWD}"
+    readonly newdir="$(mktemp -u).$(basename "${release_dir}")"
+    mkdir -vp "${newdir}"
     (
-        cd "$(mktemp -d --suffix=".$(basename "${release_dir}")")"
+        cd "${newdir}"
         tar -cf- -C "${release_dir}" . | tar -xf-
 
         gbp dch \
@@ -96,7 +98,7 @@ run_dockerized() {
         warn "skipping: docker image pull ${image_name}"
     fi
 
-    readonly workdir="$(mktemp -u --suffix=.workdir)"
+    readonly workdir="$(mktemp -u).workdir"
     docker container run \
         --dns 8.8.4.4 \
         --dns 8.8.8.8 \
@@ -105,7 +107,6 @@ run_dockerized() {
         --env DEBIAN_FRONTEND=noninteractive \
         --env DISTRIBUTION="${distribution}" \
         --env DOCKER_HOST_GID="$(id -g)" \
-        --env DOCKER_HOST_PWD="${PWD}" \
         --env DOCKER_HOST_UID="$(id -u)" \
         --env HERE="${here}" \
         --env RELEASE_DIR="${release_dir}" \
@@ -163,10 +164,9 @@ mk-build-deps \
     --tool "apt-get -y --no-install-recommends -o Debug::pkgProblemResolver=true" \
     "${RELEASE_DIR}/debian/control"
 
-readonly luser_home="$(mktemp -d --suffix=.luser.home)"
 groupadd -g "${DOCKER_HOST_GID}" luser
-useradd -u "${DOCKER_HOST_UID}" -g "${DOCKER_HOST_GID}" -d "${luser_home}" luser
-chown -cR ${DOCKER_HOST_UID}:${DOCKER_HOST_GID} ${luser_home} ${PWD}
+useradd -d $(mktemp -dt luser.home.XXXXXX) -u "${DOCKER_HOST_UID}" -g "${DOCKER_HOST_GID}" luser
+chown -cR ${DOCKER_HOST_UID}:${DOCKER_HOST_GID} $(getent passwd luser | cut -d: -f6) ${PWD}
 su luser -c "${THIS} -r -C ${RELEASE_DIR} -V ${NEW_VERSION} -- ${BUILDPACKAGE_OPTS}"
 EOF
 }
