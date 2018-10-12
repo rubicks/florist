@@ -283,8 +283,7 @@ cat "${branch_list}"
 
 while read package; do
     if ! branch_name="$(grep -E "${package}\$" <"${branch_list}")"; then
-        warn "package missing branch: ${package}"
-        continue
+        die "package missing branch: ${package}"
     fi
     git -C "${release_dir}" checkout "${branch_name}"
     # this is where we override the bloom-release version
