@@ -123,6 +123,9 @@ run_dockerized() {
         sh <<'EOF'
 set -euvx
 
+find /etc/apt/sources.list.d /var/lib/apt/lists -type f -print -delete
+${HERE}/configure-apt ${DISTRIBUTION}
+
 apt-get -y update
 apt-get -y --no-install-recommends install \
     devscripts \
