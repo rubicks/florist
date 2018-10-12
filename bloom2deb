@@ -76,7 +76,7 @@ run_raw() {
             --spawn-editor=never \
             "automated build via $(basename "${this}")"
 
-        # https://github.com/ros-infrastructure/ros_buildfarm/blob/9ddeabe176318f9a5a6ac661ffb36a5a1ef49705/ros_buildfarm/sourcedeb_job.py
+        # https://github.com/ros-infrastructure/ros_buildfarm/blob/master/ros_buildfarm/sourcedeb_job.py
         gbp buildpackage \
             --git-compression-level=9 \
             --git-compression=xz \
