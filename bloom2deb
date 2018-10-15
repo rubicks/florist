@@ -137,6 +137,8 @@ apt-get -y --no-install-recommends install \
     libdistro-info-perl \
     libfile-fcntllock-perl \
     libparse-debcontrol-perl \
+    linux-image-generic \
+    udev \
     xz-utils \
     && true
 
