@@ -91,7 +91,7 @@ run_raw() {
 }
 
 run_dockerized() {
-    readonly image_name="ros:${ros_distro}-ros-base-${distribution}"
+    readonly image_name="rubicks/ros-debbah:${ros_distro}"
     if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ]; then
         docker image pull "${image_name}"
     else
@@ -122,29 +122,6 @@ run_dockerized() {
         "${image_name}" \
         sh <<'EOF'
 set -euvx
-
-# make this container behave like a chroot
-dpkg-divert --local --rename /usr/bin/ischroot
-ln -vsf /bin/true /usr/bin/ischroot
-
-find /etc/apt/sources.list.d /var/lib/apt/lists -type f -print -delete
-${HERE}/configure-apt ${DISTRIBUTION}
-
-apt-get -y update
-apt-get -y --no-install-recommends install \
-    devscripts \
-    dpkg-dev \
-    equivs \
-    fakeroot \
-    git \
-    git-buildpackage \
-    libdistro-info-perl \
-    libfile-fcntllock-perl \
-    libparse-debcontrol-perl \
-    linux-image-generic \
-    udev \
-    xz-utils \
-    && true
 
 # From any/all debian package files within the current working directory,
 # create a temporary local apt repository
