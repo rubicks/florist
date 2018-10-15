@@ -123,6 +123,10 @@ run_dockerized() {
         sh <<'EOF'
 set -euvx
 
+# make this container behave like a chroot
+dpkg-divert --local --rename /usr/bin/ischroot
+ln -vsf /bin/true /usr/bin/ischroot
+
 find /etc/apt/sources.list.d /var/lib/apt/lists -type f -print -delete
 ${HERE}/configure-apt ${DISTRIBUTION}
 
