@@ -293,7 +293,7 @@ EOF
 }
 
 run_dockerized() {
-    readonly image_name="rubicks/florist"
+    readonly image_name="rubicks/bloomer"
     if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ]; then
         docker image pull "${image_name}"
     else
