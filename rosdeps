@@ -16,20 +16,18 @@ error() { log "ERROR: $@"; }
 
 usage() {
     cat <<EOF
-Usage: $(basename ${this}) [OPTION]... [CATKIN_WS]
-Within CATKIN_WS (default \$PWD), enumerate ros packages and print dependencies.
+Usage: $(basename ${this}) [OPTION]...
+Enumerate ros packages and print dependencies.
 
 Options
-    -h                 print this usage and return success
-    -C CATKIN_WS       run as if started in CATKIN_WS (default: \$PWD)
+    -h            print this usage and return success
+    -C WORKDIR    run as if started in WORKDIR (default: \$PWD)
 
 Examples:
 
+    \$ ./$(basename ${this})
+
     \$ ./$(basename ${this}) -C ~/code/rapidplan
-
-    \$ ./$(basename ${this}) -C ~/code/rapidplan -D xenial
-
-    \$ ./$(basename ${this}) -C ~/code/rapidplan -D xenial -R kinetic
 
 EOF
 }
@@ -52,19 +50,18 @@ cleanup() {
 run_raw() {
     # enumerate package.xml files
     readonly package_xml_list="$(mktemp -t package.xml.list.XXXXXX)"
-    find "${catkin_ws}" -type f -name 'package.xml' >"${package_xml_list}"
+    find "${workdir}" -type f -name 'package.xml' >"${package_xml_list}"
     sort -uo "${package_xml_list}" "${package_xml_list}"
 
-    # enumerate package names (assume parent directory name)
+    # enumerate package names
     readonly package_list="$(mktemp -t package.list.XXXXXX)"
-    xargs -I{} dirname {} <"${package_xml_list}" \
-        | xargs -I{} basename {} >"${package_list}"
+    xargs xpath -q -e '/package/name/text()' <"${package_xml_list}" >"${package_list}"
     sort -uo "${package_list}" "${package_list}"
 
     # discover dependencies, construct dependency list
     readonly dependency_list="$(mktemp -t dependency.list.XXXXXX)"
     while read package_xml; do
-        this_pkg="$(basename "$(dirname "${package_xml}")")"
+        this_pkg="$(xpath -q -e '/package/name/text()' "${package_xml}")"
         this_deps="$(mktemp -t "${this_pkg}.deps.XXXXXX")"
         # from the package.xml, dump all dependencies
         xpath -q \
@@ -91,17 +88,17 @@ run_dockerized() {
     docker container run \
         --dns 8.8.4.4 \
         --dns 8.8.8.8 \
-        --env CATKIN_WS="${catkin_ws}" \
+        --env WORKDIR="${workdir}" \
         --env THIS="${this}" \
         --interactive \
-        --mount type=bind,source="${catkin_ws}",target="${catkin_ws}",readonly \
+        --mount type=bind,source="${workdir}",target="${workdir}",readonly \
         --mount type=bind,source="${this}",target="${this}",readonly \
         --rm \
-        --workdir="$(mktemp -ut workdir.XXXXXX)" \
+        --workdir="${workdir}" \
         "${image_name}" \
         sh <<'EOF'
 set -eu
-nice ${THIS} -r ${CATKIN_WS}
+nice "${THIS}" -r -C "${WORKDIR}"
 EOF
 }
 
@@ -115,32 +112,26 @@ trap cleanup EXIT
 export TMPDIR="${tmpdir}"
 export LC_ALL=C
 
-while getopts ":rhC:" opt; do
+while getopts ":hrC:" opt; do
     case "${opt}" in
-        r) readonly run_raw="true" ;;
         h)
             usage
             exit "$?"
             ;;
+        r) readonly run_raw="true" ;;
+        C) readonly workdir="${OPTARG}" ;;
         :) die "Missing argument: -${OPTARG}" ;;
         \?) die "Invalid option: -${OPTARG}" ;;
     esac
 done
 shift "$((${OPTIND} - 1))"
 
-case "$#" in
-    0)
-        readonly catkin_ws="${PWD}"
-        warn "defaulting catkin_ws: ${catkin_ws}"
-        ;;
-    1)
-        readonly catkin_ws="$1"
-        inform "catkin_ws: ${catkin_ws}"
-        ;;
-    *)
-        die "bad args"
-        ;;
-esac
+if [ -n "${workdir:-}" ]; then
+    inform "workdir: ${workdir}"
+else
+    readonly workdir="${PWD}"
+    warn "defaulting workdir: ${workdir}"
+fi
 
 if [ "true" = "${run_raw:-false}" ]; then
     run_raw

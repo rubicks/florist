@@ -222,7 +222,7 @@ safe_git_clone "${upstream_bare}" "${upstream_dir}"
 git -C "${upstream_dir}" checkout "${upstream_sha1}"
 
 # create dependency list, topo sort, and reverse topo sort
-"${here}/rosdeps" "${upstream_dir}" >rosdeps.out
+"${here}/rosdeps" -C "${upstream_dir}" >rosdeps.out
 tsort <rosdeps.out >tsort.rosdeps.out
 tac <tsort.rosdeps.out >tac.tsort.rosdeps.out
 
