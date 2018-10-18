@@ -119,7 +119,15 @@ while getopts ":hrC:" opt; do
             exit "$?"
             ;;
         r) readonly run_raw="true" ;;
-        C) readonly workdir="${OPTARG}" ;;
+        C)
+            if ! workdir="$(readlink -f "${OPTARG}")"; then
+                die "missing path: ${OPTARG}"
+            fi
+            if ! [ -d "${workdir}" ]; then
+                die "missing directory: ${workdir}"
+            fi
+            readonly workdir="${workdir}"
+            ;;
         :) die "Missing argument: -${OPTARG}" ;;
         \?) die "Invalid option: -${OPTARG}" ;;
     esac
