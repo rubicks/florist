@@ -127,8 +127,10 @@ set -euvx
 # create a temporary local apt repository
 
 dpkg-scanpackages --multiversion . >Packages
+dpkg-scansources . >Sources
 cat >/etc/apt/sources.list.d/workdir.list <<WORKDIR_LIST
-deb [trusted=yes] file://${PWD} ./
+deb     [trusted=yes] file://${PWD} ./
+deb-src [trusted=yes] file://${PWD} ./
 WORKDIR_LIST
 
 # Work around the following APT issue by using "Acquire::GzipIndexes=false":

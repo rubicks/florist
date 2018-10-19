@@ -99,7 +99,7 @@ safe_git_clone() {
         error "failure: git -C ${dst} fetch --verbose --all"
         return 1
     fi
-    warn "will use existing clone"
+    warn "will use existing clone: ${dst}"
     return 0
 }
 
@@ -123,6 +123,18 @@ hashify() {
             git rev-parse "$3"
         fi
     )
+}
+
+# within the given Debian Packages/Sources index file, search for the given
+# package and version
+#
+# $1 : index file path
+# $2 : debian package name
+# $3 : debian package version
+debidx_contains() {
+    sed -nr 's/^(Package|Version): (.*)$/\2/gp' "$1" \
+        | xargs -L2 \
+        | grep -q "^${2} ${3}$"
 }
 
 #############################
@@ -199,7 +211,6 @@ if [ -n "${release_bare:-}" ]; then
 else
     readonly release_bare="${PWD}/${package_name}-release.git"
     warn "defaulting release_bare: ${release_bare}"
-    warn "$(git init --bare "${release_bare}")"
 fi
 ##################
 # BLOOM ARGS END #
@@ -251,12 +262,18 @@ else
     warn "defaulting distribution: ${distribution}"
 fi
 
-"${here}/upstream2bloom" \
-    -C "${release_bare}" \
-    -R "${ros_distro}" \
-    -b "${upstream_devel_branch}" \
-    -t "${upstream_treeish}" \
-    "${upstream_uri}"
+if ! [ -d "${release_bare}" ]; then
+    # TODO: Should I be doing this here?
+    warn "$(git init --bare "${release_bare}")"
+    "${here}/upstream2bloom" \
+        -C "${release_bare}" \
+        -R "${ros_distro}" \
+        -b "${upstream_devel_branch}" \
+        -t "${upstream_treeish}" \
+        "${upstream_uri}"
+else
+    warn "skipping upstream2bloom, extant release_bare: ${release_bare}"
+fi
 
 readonly release_dir="${release_bare%.git}.dir"
 mkdir -vp "${release_dir}"
@@ -264,7 +281,6 @@ safe_git_clone "${release_bare}" "${release_dir}"
 
 readonly branch_list="${release_dir%.dir}.branch.list"
 git -C "${release_dir}" branch -a >"${branch_list}"
-cat "${branch_list}"
 
 # > [a package name] must only consist of alphanumerics and _ separators
 #
@@ -272,16 +288,22 @@ cat "${branch_list}"
 #
 # ..._*BUT*_ catkin will happily build packages with hyphens, too.
 sed -nri "s|^  remotes/origin/(debian/${ros_distro}/${distribution}/[[:alnum:]_-]+)$|\1|gp" "${branch_list}"
-cat "${branch_list}"
-
-# # uncomment this to avoid "*_example" subprojects
-# sed -ri '/.*_examples$/d' "${branch_list}"
-# cat "${branch_list}"
-
 sort -uo "${branch_list}" "${branch_list}"
-cat "${branch_list}"
 
+# uncomment this to avoid "*_example" subprojects
+#sed -ri '/.*_examples$/d' "${branch_list}"
+
+# `bloom2deb` creates a file-local apt repository with `Packages` and `Sources`
+# files in the current working directory.
+touch Packages Sources
 while read package; do
+    dpkg_name="$(echo "${package}" | tr '_' '-')"
+    if true \
+            && debidx_contains Packages "${dpkg_name}" "${new_version}" \
+            && debidx_contains Sources "${dpkg_name}" "${new_version}"; then
+        warn "skipping bloom2deb, already present: ${dpkg_name} ${new_version}"
+        continue
+    fi
     if ! branch_name="$(grep -E "${package}\$" <"${branch_list}")"; then
         die "package missing branch: ${package}"
     fi
