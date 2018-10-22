@@ -297,14 +297,16 @@ sort -uo "${branch_list}" "${branch_list}"
 # files in the current working directory.
 touch Packages Sources
 while read package; do
-    dpkg_name="$(echo "${package}" | tr '_' '-')"
+    dpkg_name="$(echo "ros-${ros_distro}-${package}" | tr '_' '-')"
     if true \
-            && debidx_contains Packages "${dpkg_name}" "${new_version}" \
-            && debidx_contains Sources "${dpkg_name}" "${new_version}"; then
-        warn "skipping bloom2deb, already present: ${dpkg_name} ${new_version}"
+           && debidx_contains Packages "${dpkg_name}" "${new_version}" \
+           && debidx_contains Sources "${dpkg_name}" "${new_version}"; then
+            inform "extant debian source: ${dpkg_name} ${new_version}"
+        warn "skipping bloom2deb: ${dpkg_name} ${new_version}"
         continue
     fi
-    if ! branch_name="$(grep -E "${package}\$" <"${branch_list}")"; then
+    inform "starting bloom2deb: ${dpkg_name} ${new_version}"
+    if ! branch_name="$(grep -Eq "${package}\$" <"${branch_list}")"; then
         die "package missing branch: ${package}"
     fi
     git -C "${release_dir}" checkout "${branch_name}"
