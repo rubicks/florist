@@ -306,7 +306,7 @@ while read package; do
         continue
     fi
     inform "starting bloom2deb: ${dpkg_name} ${new_version}"
-    if ! branch_name="$(grep -Eq "${package}\$" <"${branch_list}")"; then
+    if ! branch_name="$(grep -E "${package}\$" <"${branch_list}")"; then
         die "package missing branch: ${package}"
     fi
     git -C "${release_dir}" checkout "${branch_name}"
