@@ -91,7 +91,7 @@ run_raw() {
 }
 
 run_dockerized() {
-    readonly image_name="rubicks/ros-debbah:${ros_distro}"
+    readonly image_name="rubicks/ros-dpkg:${ros_distro}"
     if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ]; then
         docker image pull "${image_name}"
     else
