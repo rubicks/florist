@@ -14,8 +14,8 @@ readonly default_ros_distro="kinetic"
 readonly default_upstream_treeish="HEAD"
 
 log() { echo "${whatami}[$$]: $@" >&2; }
-inform() { log "INFO: $@"; }
-warn() { log "WARNING: $@"; }
+info() { log "INFO: $@"; }
+warning() { log "WARNING: $@"; }
 error() { log "ERROR: $@"; }
 
 usage() {
@@ -79,14 +79,14 @@ safe_git_clone() {
     dst="$2"
     shift 2
     if [ -d "${dst}" ]; then
-        warn "exists: ${dst}"
+        warning "exists: ${dst}"
     else
         mkdir -vp "${dst}"
     fi
     if git clone $@ "${src}" "${dst}"; then
         return 0
     fi
-    warn "failure: git clone $@ ${src} ${dst}"
+    warning "failure: git clone $@ ${src} ${dst}"
     if ! extant_remote="$(git -C ${dst} config --get remote.origin.url)"; then
         error "failure: git -C ${dst} config --get remote.origin.url"
         return 1
@@ -99,7 +99,7 @@ safe_git_clone() {
         error "failure: git -C ${dst} fetch --verbose --all"
         return 1
     fi
-    warn "will use existing clone: ${dst}"
+    warning "will use existing clone: ${dst}"
     return 0
 }
 
@@ -125,23 +125,7 @@ hashify() {
     )
 }
 
-# within the given Debian Packages/Sources index file, search for the given
-# package and version
-#
-# $1 : index file path
-# $2 : debian package name
-# $3 : debian package version
-debidx_contains() {
-    sed -nr 's/^(Package|Version): (.*)$/\2/gp' "$1" \
-        | xargs -L2 \
-        | grep -q "^${2} ${3}$"
-}
-
-#############################
-# ######################### #
-# # REAL WORK STARTS HERE # #
-# ######################### #
-#############################
+################################################################################
 
 trap cleanup EXIT
 export TMPDIR="${tmpdir}"
@@ -180,37 +164,37 @@ ends_with "${upstream_uri}" '.git' || die "missing .git suffix: ${upstream_uri}"
 
 readonly package_name="$(basename "$1" .git)"
 if is_good_package_name "${package_name}"; then
-    inform "good package_name: ${package_name}"
+    info "good package_name: ${package_name}"
 else
     die "bad package name: ${package_name}"
 fi
 
 if [ -n "${ros_distro:-}" ]; then
-    inform "ros_distro: ${ros_distro}"
+    info "ros_distro: ${ros_distro}"
 else
     readonly ros_distro="${default_ros_distro}"
-    warn "defaulting ros_distro: ${ros_distro}"
+    warning "defaulting ros_distro: ${ros_distro}"
 fi
 
 if [ -n "${upstream_devel_branch:-}" ]; then
-    inform "upstream_devel_branch: ${upstream_devel_branch}"
+    info "upstream_devel_branch: ${upstream_devel_branch}"
 else
     readonly upstream_devel_branch="${default_ros_distro}-devel"
-    warn "defaulting upstream_devel_branch: ${upstream_devel_branch}"
+    warning "defaulting upstream_devel_branch: ${upstream_devel_branch}"
 fi
 
 if [ -n "${upstream_treeish:-}" ]; then
-    inform "upstream_treeish: ${upstream_treeish}"
+    info "upstream_treeish: ${upstream_treeish}"
 else
     readonly upstream_treeish="${default_upstream_treeish}"
-    warn "defaulting upstream_treeish: ${upstream_treeish}"
+    warning "defaulting upstream_treeish: ${upstream_treeish}"
 fi
 
 if [ -n "${release_bare:-}" ]; then
-    inform "release_bare: ${release_bare}"
+    info "release_bare: ${release_bare}"
 else
     readonly release_bare="${PWD}/${package_name}-release.git"
-    warn "defaulting release_bare: ${release_bare}"
+    warning "defaulting release_bare: ${release_bare}"
 fi
 ##################
 # BLOOM ARGS END #
@@ -239,7 +223,7 @@ tac <tsort.rosdeps.out >tac.tsort.rosdeps.out
 
 # vet new_version
 if [ -n "${new_version:-}" ]; then
-    inform "new_version: ${new_version}"
+    info "new_version: ${new_version}"
 else
     if ! new_version="$(git -C "${upstream_bare}" describe --long --tags "${upstream_sha1}")"; then
         die "failure: git -C ${upstream_bare} describe --long --tags ${upstream_sha1}"
@@ -251,20 +235,20 @@ else
     if ! [ -n "${new_version}" ]; then
         die "empty new_version"
     fi
-    warn "defaulting new_version: ${new_version}"
+    warning "defaulting new_version: ${new_version}"
 fi
 
 # vet distribution
 if [ -n "${distribution:-}" ]; then
-    inform "distribution: ${distribution}"
+    info "distribution: ${distribution}"
 else
     readonly distribution="${default_distribution}"
-    warn "defaulting distribution: ${distribution}"
+    warning "defaulting distribution: ${distribution}"
 fi
 
 if ! [ -d "${release_bare}" ]; then
     # TODO: Should I be doing this here?
-    warn "$(git init --bare "${release_bare}")"
+    warning "$(git init --bare "${release_bare}")"
     "${here}/upstream2bloom" \
         -C "${release_bare}" \
         -R "${ros_distro}" \
@@ -272,7 +256,7 @@ if ! [ -d "${release_bare}" ]; then
         -t "${upstream_treeish}" \
         "${upstream_uri}"
 else
-    warn "skipping upstream2bloom, extant release_bare: ${release_bare}"
+    warning "skipping upstream2bloom, extant release_bare: ${release_bare}"
 fi
 
 readonly release_dir="${release_bare%.git}.dir"
@@ -298,30 +282,35 @@ sort -uo "${branch_list}" "${branch_list}"
 touch Packages Sources
 while read package; do
     dpkg_name="$(echo "ros-${ros_distro}-${package}" | tr '_' '-')"
-    if true \
-           && debidx_contains Packages "${dpkg_name}" "${new_version}" \
-           && debidx_contains Sources "${dpkg_name}" "${new_version}"; then
-            inform "extant debian source: ${dpkg_name} ${new_version}"
-        warn "skipping bloom2deb: ${dpkg_name} ${new_version}"
-        continue
-    fi
-    inform "starting bloom2deb: ${dpkg_name} ${new_version}"
     if ! branch_name="$(grep -E "${package}\$" <"${branch_list}")"; then
         die "package missing branch: ${package}"
     fi
+    sed -nr 's/^(Package|Version): (.*)$/\2/gp' Packages | xargs -L2 >packages.list
+    sed -nr 's/^(Package|Version): (.*)$/\2/gp' Sources | xargs -L2 >sources.list
+    if extant_package="$(grep "^${dpkg_name} ${new_version}$" packages.list)"; then
+        info "extant package: ${extant_package}"
+    fi
+    if extant_source="$(grep "^${dpkg_name} ${new_version}$" sources.list)"; then
+        info "extant source: ${extant_source}"
+    fi
+    if [ -n "${extant_package:-}" ] && [ -n "${extant_source:-}" ]; then
+        warning "skipping bloom2deb: ${dpkg_name} ${new_version}"
+        continue
+    fi
+    info "starting bloom2deb: ${dpkg_name} ${new_version}"
     git -C "${release_dir}" checkout "${branch_name}"
     # this is where we override the bloom-release version
     "${here}/bloom2deb" -C "${release_dir}" -V "${new_version}"
-    inform "SUCCESS: BUILT branch ${branch_name}, version ${new_version}"
+    info "SUCCESS: BUILT branch ${branch_name}, version ${new_version}"
 done <tac.tsort.rosdeps.out
 
-inform "SUCCESS: PACKAGED ${upstream_bare}"
-inform "new_version           : ${new_version}"
-inform "release_bare          : ${release_bare}"
-inform "ros_distro            : ${ros_distro}"
-inform "upstream_devel_branch : ${upstream_devel_branch}"
-inform "upstream_sha1         : ${upstream_sha1}"
-inform "upstream_treeish      : ${upstream_treeish}"
-inform "upstream_uri          : ${upstream_uri}"
+info "SUCCESS: PACKAGED ${upstream_bare}"
+info "new_version           : ${new_version}"
+info "release_bare          : ${release_bare}"
+info "ros_distro            : ${ros_distro}"
+info "upstream_devel_branch : ${upstream_devel_branch}"
+info "upstream_sha1         : ${upstream_sha1}"
+info "upstream_treeish      : ${upstream_treeish}"
+info "upstream_uri          : ${upstream_uri}"
 
 exit "$?"
