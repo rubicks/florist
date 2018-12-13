@@ -310,16 +310,6 @@ run_dockerized() {
         warn "skipping: docker image pull ${image_name}"
     fi
 
-    # How to SSH agent forward into a docker container
-    # https://gist.github.com/d11wtq/8699521
-    #
-    # work around undefined SSH_AUTH_SOCK
-    if [ -S "${SSH_AUTH_SOCK:-}" ]; then
-        readonly keyring_dir="$(dirname ${SSH_AUTH_SOCK})"
-    else
-        readonly keyring_dir="$(mktemp -dt fake-keyring-XXXXXX)"
-    fi
-
     readonly workdir="$(mktemp -ut workdir.XXXXXX)"
     readonly luser_home="$(mktemp -ut luser.home.XXXXXX)"
     docker container run \
@@ -334,24 +324,23 @@ run_dockerized() {
         --env LUSER_HOME="${luser_home}" \
         --env RELEASE_BARE="${release_bare}" \
         --env ROS_DISTRO="${ros_distro}" \
-        --env SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+        --env SSH_AUTH_SOCK="${SSH_AUTH_SOCK}" \
         --env THIS="${this}" \
         --env UPSTREAM_BARE="${upstream_bare}" \
         --env UPSTREAM_DEVEL_BRANCH="${upstream_devel_branch}" \
         --env UPSTREAM_TREEISH="${upstream_treeish}" \
         --env UPSTREAM_URI="${upstream_uri}" \
         --interactive \
+        --mount type=bind,source="$(dirname ${SSH_AUTH_SOCK})",target="$(dirname ${SSH_AUTH_SOCK})" \
         --mount type=bind,source="${HOME}/.ssh",target="${luser_home}/.ssh",readonly \
         --mount type=bind,source="${PWD}",target="${workdir}" \
         --mount type=bind,source="${here}",target="${here}",readonly \
-        --mount type=bind,source="${keyring_dir}",target="${keyring_dir}" \
         --mount type=bind,source="${release_bare}",target="${release_bare}" \
         --mount type=bind,source="${upstream_bare}",target="${upstream_bare}",readonly \
         --mount type=bind,source=/usr/local/share/ca-certificates,target=/usr/local/share/ca-certificates,readonly \
         --rm \
         --workdir="${workdir}" \
-        "${image_name}" \
-        sh <<'EOF'
+        "${image_name}" sh <<'EOF'
 set -euvx
 
 update-ca-certificates
@@ -388,6 +377,14 @@ EOF
 trap cleanup EXIT
 export TMPDIR="${tmpdir}"
 export LC_ALL=C
+
+if ! [ -n "${SSH_AUTH_SOCK:-}" ]; then
+    die "undefined SSH_AUTH_SOCK"
+fi
+
+if ! [ -S "${SSH_AUTH_SOCK}" ]; then
+    die "not a socket: ${SSH_AUTH_SOCK}"
+fi
 
 while getopts ":hrC:R:b:t:" opt; do
     case "${opt}" in
