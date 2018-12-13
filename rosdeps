@@ -78,7 +78,7 @@ run_raw() {
 }
 
 run_dockerized() {
-    readonly image_name="rubicks/bloomer"
+    readonly image_name="registry.gitlab.com/realtime-neil/bloomer"
     if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ]; then
         docker image pull "${image_name}" >&2
     else

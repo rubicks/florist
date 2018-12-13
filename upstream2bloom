@@ -250,21 +250,21 @@ set timeout 3600
 
 expect {
   timeout {
-    send_user "\nERROR: TIMEOUT\n"
+    send_user "\n#### ERROR: TIMEOUT AFTER ONE HOUR ####\n"
     exit 1
   }
 
   -ex "\u001b\[32m<== \u001b\[0m\u001b\[0mReleased '${package_name}' using release track '${ros_distro}' successfully\u001b\[0m\r" {
-    send_user "\nSUCCESS\n"
+    send_user "\n#### SUCCESS: RELEASED ${package_name} FOR ${ros_distro} ####\n"
   }
 }
 
-set timeout 20
+set timeout 300
 
 while 1 {
   expect {
     timeout {
-      send_user "\nERROR: TIMEOUT\n"
+      send_user "\n#### ERROR: TIMEOUT AFTER FIVE MINUTES ####\n"
       exit 1
     }
 
@@ -294,6 +294,7 @@ while 1 {
     }
 
     eof {
+      send_user "\n#### SUCCESS: BLOOM DONE ####\n"
       exit 0
     }
   }
@@ -303,7 +304,7 @@ EOF
 }
 
 run_dockerized() {
-    readonly image_name="rubicks/bloomer"
+    readonly image_name="registry.gitlab.com/realtime-neil/bloomer"
     if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ]; then
         docker image pull "${image_name}"
     else

@@ -1,8 +1,6 @@
 florist
 =======
 
-https://github.com/rubicks/florist
-
 Release and package stuff from a ROS project.
 
 # Q. What is this?
