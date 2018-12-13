@@ -131,7 +131,16 @@ run_raw() {
         git config --global user.email "$(whoami)@$(hostname)"
         warn "defaulting git config --global user.email: $(git config --global user.email)"
     fi
-    bloom-release --version
+
+    # `bloom-release` is stupid because it implicitly invokes `rosdep update`
+    # for you, but only _after_ it performs several **extremely**
+    # time-consuming tasks. **AND** it eats the `rosdep update` error messages
+    # because of course it does. To fail faster on a bad `rosdep`
+    # configuration, we need an explicit `rosdep update` before we attempt to
+    # bloom.
+    #
+    # -- neil 2018.12.13
+    rosdep update --verbose
 
     # `bloom-release` is stupid because it forces interactivity by reading from
     # the terminal device instead of stdin. To defeat this, we need to fight
@@ -139,7 +148,8 @@ run_raw() {
     # know a better way to force bloom-release to run non-interactively, I
     # encourage you to re-write this horror.
     #
-    # -- nroza 2018.07.31
+    # -- neil 2018.07.31
+    bloom-release --version
     export fake_version
     export package_name
     export release_bare
