@@ -1,0 +1,3 @@
+[submodule "scrippies"]
+	path = scrippies
+	url = https://gitlab.com/realtime-robotics/scrippies.git

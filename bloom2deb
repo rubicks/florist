@@ -100,28 +100,29 @@ run_dockerized() {
 
     readonly workdir="$(mktemp -u).workdir"
     docker container run \
-        --dns 8.8.4.4 \
-        --dns 8.8.8.8 \
         --env BUILDPACKAGE_OPTS="${buildpackage_opts}" \
+        --env CONFIGURE_APT_OPTS="${CONFIGURE_APT_OPTS:-}" \
         --env DEBCONF_NONINTERACTIVE_SEEN=true \
         --env DEBIAN_FRONTEND=noninteractive \
         --env DISTRIBUTION="${distribution}" \
         --env DOCKER_HOST_GID="$(id -g)" \
         --env DOCKER_HOST_UID="$(id -u)" \
         --env HERE="${here}" \
+        --env NEW_VERSION="${new_version}" \
         --env RELEASE_DIR="${release_dir}" \
         --env ROS_DISTRO="${ros_distro}" \
         --env THIS="${this}" \
-        --env NEW_VERSION="${new_version}" \
         --interactive \
         --mount type=bind,source="${PWD}",target="${workdir}" \
         --mount type=bind,source="${here}",target="${here}",readonly \
         --mount type=bind,source="${release_dir}",target="${release_dir}",readonly \
         --rm \
         --workdir="${workdir}" \
-        "${image_name}" \
-        sh <<'EOF'
+        "${image_name}" sh <<'EOF'
 set -euvx
+
+${HERE}/scrippies/configure-apt ${CONFIGURE_APT_OPTS} ${DISTRIBUTION}
+apt-get -y update
 
 # From any/all debian package files within the current working directory,
 # create a temporary local apt repository
