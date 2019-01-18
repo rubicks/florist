@@ -121,12 +121,22 @@ run_dockerized() {
         "${image_name}" sh <<'EOF'
 set -euvx
 
+# proactive protection against a bad proxy
+#
+# * https://askubuntu.com/questions/679233/failed-to-fetch-hash-sum-mismatch-tried-rm-apt-list-but-didnt-work
+# * https://serverfault.com/questions/722893/debian-mirror-hash-sum-mismatch
+# * https://gist.github.com/trastle/5722089
+find /var/lib/apt/lists -type f -print -delete
+cat >/etc/apt/apt.conf.d/99fixbadproxy <<FIXBADPROXY
+Acquire::http::Pipeline-Depth "0";
+Acquire::http::No-Cache=True;
+Acquire::BrokenProxy=true;
+FIXBADPROXY
+
 ${HERE}/scrippies/configure-apt ${CONFIGURE_APT_OPTS} ${DISTRIBUTION}
-apt-get -y update
 
 # From any/all debian package files within the current working directory,
 # create a temporary local apt repository
-
 dpkg-scanpackages --multiversion . >Packages
 dpkg-scansources . >Sources
 cat >/etc/apt/sources.list.d/workdir.list <<WORKDIR_LIST
@@ -134,7 +144,8 @@ deb     [trusted=yes] file://${PWD} ./
 deb-src [trusted=yes] file://${PWD} ./
 WORKDIR_LIST
 
-# Work around the following APT issue by using "Acquire::GzipIndexes=false":
+# use apt config option "Acquire::GzipIndexes=false" to work around the
+# following issue:
 #
 # Err:3 file:/tmp/tmp.nKz7UlX66y.workdir ./ Packages Could not open file
 # /var/lib/apt/lists/partial/_tmp_tmp.nKz7UlX66y.workdir_._Packages - open (13:
