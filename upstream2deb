@@ -285,13 +285,7 @@ if [ -n "${release_bare:-}" ]; then
     info "given release_bare: ${release_bare}"
 else
     readonly release_bare="${PWD}/${package_name}-release.git"
-    mkdir -p "${release_bare}"
     warning "defaulting release_bare: ${release_bare}"
-fi
-if is_good_release_bare "${release_bare}"; then
-    info "good release_bare: ${release_bare}"
-else
-    die "bad release_bare: ${release_bare}"
 fi
 
 ##################
@@ -360,6 +354,7 @@ rm -vf "${orig_tarball}" "${orig_tarball%.*}"
 gzip "${orig_tarball%.*}"
 
 do_bloom() {
+    mkdir -vp "${release_bare}"
     info "$(git -C "${release_bare}" init)"
     "${here}/tarball2bloom" \
         -C "${release_bare}" \
