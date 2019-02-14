@@ -61,6 +61,10 @@ cleanup() {
 
 ends_with() { [ "${1}" != "${1%${2}}" ]; }
 
+is_good_release_bare() {
+    test -d "$(readlink -f "$1")"
+}
+
 # * it must only consist of alphanumerics and _ separators. Other symbols might
 #   not be supported by some OSes (e.g. unicode characters) or would make it
 #   hard to follow OSes conventions
@@ -276,12 +280,20 @@ else
     warning "defaulting upstream_treeish: ${upstream_treeish}"
 fi
 
+# release_bare
 if [ -n "${release_bare:-}" ]; then
-    info "release_bare: ${release_bare}"
+    info "given release_bare: ${release_bare}"
 else
     readonly release_bare="${PWD}/${package_name}-release.git"
+    mkdir -p "${release_bare}"
     warning "defaulting release_bare: ${release_bare}"
 fi
+if is_good_release_bare "${release_bare}"; then
+    info "good release_bare: ${release_bare}"
+else
+    die "bad release_bare: ${release_bare}"
+fi
+
 ##################
 # BLOOM ARGS END #
 ##################
