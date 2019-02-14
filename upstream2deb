@@ -25,6 +25,7 @@ Bloom, build, and package the given UPSTREAM_URI.
 
 Options
     -h                          print this usage and return success
+    -f                          force re-blooming extant release repository
     -C RELEASE_BARE             bloom into RELEASE_BARE (default: \$(basename -s .git \${UPSTREAM_URI})-release.git)
     -R ROS_DISTRO               bloom for ROS_DISTRO (default: ${default_ros_distro})
     -b UPSTREAM_DEVEL_BRANCH    upstream devel branch (default: \${ROS_DISTRO}-devel)
@@ -99,30 +100,115 @@ safe_git_clone() {
         error "failure: git -C ${dst} fetch --verbose --all"
         return 1
     fi
+    if ! git -C "${dst}" submodule update --init --recursive; then
+        error "failure: git -C ${dst} submodule update --init --recursive"
+        return 1
+    fi
     warning "will use existing clone: ${dst}"
     return 0
 }
 
 is_sha1() { echo "$1" | grep -Eq "^[[:xdigit:]]{40}$"; }
 
-# $1 : upstream_bare
+# $1 : git checkout path
+# $2 : git branch name
+# $3 : git treeish
+hashify_checkout() {
+    if is_sha1 "$3"; then
+        if ! git -C "$1" log --pretty=oneline "remotes/origin/$2" | grep -Eq "^$3 "; then
+            die "branch origin/$2 missing hash $3"
+        fi
+        echo "$3"
+    elif [ "HEAD" = "$3" ]; then
+        git -C "$1" rev-parse "remotes/origin/$2"
+    else
+        git -C "$1" rev-parse "$3"
+    fi
+}
+
+# $1 : git remote
 # $2 : upstream_devel_branch
 # $3 : upstream_treeish
 hashify() {
+    local checkout_dir=""
+    if [ -d "$1" ]; then
+        case "$(git -C "$1" rev-parse --is-bare-repository)" in
+            true)
+                checkout_dir="$(mktemp -dt hashify_checkout_dir.XXXXXX)"
+                git clone "$1" "${checkout_dir}"
+                ;;
+            false)
+                checkout_dir="$1"
+                ;;
+            *)
+                error "failure: git -C $1 rev-parse --is-bare-repository"
+                return 1
+                ;;
+        esac
+    else
+        checkout_dir="$(mktemp -dt hashify_checkout_dir.XXXXXX)"
+        git clone "$1" "${checkout_dir}"
+    fi
+    hashify_checkout "${checkout_dir}" "$2" "$3"
+}
+
+ttcopy() {
+    tar -C "$1" -cf- . | tar -C "${2:-${PWD}}" -xf-
+}
+
+# Print a sha1 for the current state of the checkout.
+#
+# When there are uncommitted changes, `git stash create` will make a commit
+# object (without storing it) and print it. When there are no uncommitted
+# changes, `git stash create` will print an empty string and succeed; in this
+# case we want get sha1sum of the HEAD. We attempt to print both, but take only
+# the first.
+#
+# $1 : git checkout directory
+get_vcs_ref() {
     (
-        cd "$(mktemp -d)"
-        git clone "$1" .
-        if is_sha1 "$3"; then
-            if ! git log --pretty=oneline "remotes/origin/$2" | grep -Eq "^$3 "; then
-                die "branch origin/$2 missing hash $3"
-            fi
-            echo "$3"
-        elif [ "HEAD" = "$3" ]; then
-            git rev-parse "remotes/origin/$2"
-        else
-            git rev-parse "$3"
+        git -C "$1" stash create
+        git -C "$1" rev-parse HEAD
+    ) | head -1
+}
+
+# Copy given git checkout directory into optional destination directory using
+# `git archive`.
+#
+# reference:
+# https://git-scm.com/docs/git-submodule#git-submodule-foreach--recursiveltcommandgt
+#
+# $1 : git checkout directory
+# $2 : target directory (default: $PWD)
+gitcopy() {
+    git -C "$1" archive "$(get_vcs_ref "$1")" \
+        | tar -C "${2:-${PWD}}" -xf-
+    git -C "$1" submodule foreach --recursive --quiet \
+        "git archive --prefix=\${sm_path}/ \${sha1} | tar -C ${2:-${PWD}} -xf-"
+}
+
+# Copy given source directory contents into optional destination directory. If
+# `git` is present and source directory is a git checkout, then use `gitcopy`;
+# else use `ttcopy`.
+#
+# $1 : source directory
+# $2 : target directory (default: $PWD)
+dircopy() {
+    if command -v git >/dev/null 2>&1; then
+        if git -C "$1" status >/dev/null 2>&1; then
+            gitcopy "$1" "${2:-${PWD}}"
+            return "$?"
         fi
-    )
+    fi
+    ttcopy "$1" "${2:-${PWD}}"
+}
+
+grep_deb_version() {
+    echo $@ | grep -Eo '[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+-[[:digit:]]+-g[[:xdigit:]]{7}'
+}
+
+grep_ros_version() {
+    echo $@ | grep -Eo '[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+'
 }
 
 ################################################################################
@@ -131,13 +217,13 @@ trap cleanup EXIT
 export TMPDIR="${tmpdir}"
 export LC_ALL=C
 
-while getopts ":hrC:R:b:t:D:V:" opt; do
+while getopts ":hfC:R:b:t:D:V:" opt; do
     case "${opt}" in
         h)
             usage
             exit "$?"
             ;;
-        r) readonly run_raw="true" ;;
+        f) readonly force_bloom="true" ;;
         C)
             if ! [ -d "$(readlink -f "${OPTARG}")" ]; then
                 die "not a directory: ${OPTARG}"
@@ -200,35 +286,30 @@ fi
 # BLOOM ARGS END #
 ##################
 
-# create local upstream mirror
-readonly upstream_bare="${PWD}/${package_name}.git"
-safe_git_clone "${upstream_uri}" "${upstream_bare}" --mirror
+# clone upstream into local (non-bare) checkout
+readonly upstream_checkout="${PWD}/${package_name}.checkout"
+safe_git_clone \
+    "${upstream_uri}" "${upstream_checkout}" \
+    --recursive \
+    --branch "${upstream_devel_branch}"
 
 # discover the upstream sha1
-if ! upstream_sha1="$(hashify "${upstream_bare}" "${upstream_devel_branch}" "${upstream_treeish}")"; then
-    die "failure: hashify ${upstream_bare} ${upstream_devel_branch} ${upstream_treeish}"
+if ! upstream_sha1="$(hashify "${upstream_checkout}" "${upstream_devel_branch}" "${upstream_treeish}")"; then
+    die "failure: hashify ${upstream_checkout} ${upstream_devel_branch} ${upstream_treeish}"
 fi
 readonly upstream_sha1="${upstream_sha1}"
 
-# clone upstream, checkout upstream sha1
-readonly upstream_dir="${upstream_bare%.git}.dir"
-mkdir -vp "${upstream_dir}"
-safe_git_clone "${upstream_bare}" "${upstream_dir}"
-git -C "${upstream_dir}" checkout "${upstream_sha1}"
-
-# create dependency list, topo sort, and reverse topo sort
-"${here}/rosdeps" -C "${upstream_dir}" >rosdeps.out
-tsort <rosdeps.out >tsort.rosdeps.out
-tac <tsort.rosdeps.out >tac.tsort.rosdeps.out
+git -C "${upstream_checkout}" checkout "${upstream_sha1}"
+git -C "${upstream_checkout}" submodule update --init --recursive
 
 # vet new_version
 if [ -n "${new_version:-}" ]; then
     info "new_version: ${new_version}"
 else
-    if ! new_version="$(git -C "${upstream_bare}" describe --long --tags "${upstream_sha1}")"; then
-        die "failure: git -C ${upstream_bare} describe --long --tags ${upstream_sha1}"
+    if ! new_version="$(git -C "${upstream_checkout}" describe --long "${upstream_sha1}")"; then
+        die "failure: git -C ${upstream_checkout} describe --long ${upstream_sha1}"
     fi
-    if ! new_version="$(echo ${new_version} | grep -Eo '[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+-[[:digit:]]+-g[[:xdigit:]]{7}')"; then
+    if ! new_version="$(grep_deb_version "${new_version}")"; then
         die "failure: bad version string"
     fi
     readonly new_version="${new_version}"
@@ -246,17 +327,47 @@ else
     warning "defaulting distribution: ${distribution}"
 fi
 
-if ! [ -d "${release_bare}" ]; then
-    # TODO: Should I be doing this here?
-    warning "$(git init --bare "${release_bare}")"
-    "${here}/upstream2bloom" \
+# > The upstream repository is the repository where you do your development
+# > and host the source code of your package. This repository can be hosted
+# > anywhere (even locally) and can be a git, hg, or svn repository or the
+# > location of an archive (tar.gz only for now, but there are plans for
+# > tar.bz and zip).
+#
+# --- http://wiki.ros.org/bloom/Tutorials/FirstTimeRelease#Preparing_for_Release
+readonly orig_tarball="${PWD}/${package_name}_${new_version}.orig.tar.gz"
+rm -vf "${orig_tarball}" "${orig_tarball%.*}"
+(
+    cd "$(mktemp -dt "${package_name}.gitcopy.XXXXXX")"
+    gitcopy "${upstream_checkout}" .
+    # http://www.etalabs.net/sh_tricks.html
+    find . ! -type d \
+        | sort \
+        | sed 's/./\\&/g' \
+        | xargs tar -rf "${orig_tarball%.*}"
+)
+gzip "${orig_tarball%.*}"
+
+do_bloom() {
+    info "$(git -C "${release_bare}" init)"
+    "${here}/tarball2bloom" \
         -C "${release_bare}" \
         -R "${ros_distro}" \
-        -b "${upstream_devel_branch}" \
-        -t "${upstream_treeish}" \
-        "${upstream_uri}"
+        -P "${package_name}" \
+        -V "$(grep_ros_version "${new_version}")" \
+        "${orig_tarball}"
+}
+
+if [ -d "${release_bare}" ]; then
+        warning "extant release_bare: ${release_bare}"
+        if [ "true" = "${force_bloom:-false}" ]; then
+            warning "forcing bloom as requested"
+            find "${release_bare}" -mindepth 1 -delete
+            do_bloom
+        else
+            warning "skipping bloom"
+        fi
 else
-    warning "skipping upstream2bloom, extant release_bare: ${release_bare}"
+    do_bloom
 fi
 
 readonly release_dir="${release_bare%.git}.dir"
@@ -276,6 +387,11 @@ sort -uo "${branch_list}" "${branch_list}"
 
 # uncomment this to avoid "*_example" subprojects
 #sed -ri '/.*_examples$/d' "${branch_list}"
+
+# create dependency list, topo sort, and reverse topo sort
+"${here}/rosdeps" -C "${upstream_checkout}" >rosdeps.out
+tsort <rosdeps.out >tsort.rosdeps.out
+tac <tsort.rosdeps.out >tac.tsort.rosdeps.out
 
 # `bloom2deb` creates a file-local apt repository with `Packages` and `Sources`
 # files in the current working directory.
@@ -304,7 +420,7 @@ while read package; do
     info "SUCCESS: BUILT branch ${branch_name}, version ${new_version}"
 done <tac.tsort.rosdeps.out
 
-info "SUCCESS: PACKAGED ${upstream_bare}"
+info "SUCCESS: PACKAGED ${upstream_checkout}"
 info "new_version           : ${new_version}"
 info "release_bare          : ${release_bare}"
 info "ros_distro            : ${ros_distro}"
