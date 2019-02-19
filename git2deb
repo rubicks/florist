@@ -211,7 +211,7 @@ sort -uo "${branch_list}" "${branch_list}"
 #sed -ri '/.*_examples$/d' "${branch_list}"
 
 # create dependency list, topo sort, and reverse topo sort
-"${here}/rosdeps" -C "${upstream_checkout}" >rosdeps.out
+"${here}/rosdeps" -C "${workdir}" >rosdeps.out
 tsort <rosdeps.out >tsort.rosdeps.out
 tac <tsort.rosdeps.out >tac.tsort.rosdeps.out
 
@@ -225,30 +225,28 @@ while read package; do
     fi
     sed -nr 's/^(Package|Version): (.*)$/\2/gp' Packages | xargs -L2 >packages.list
     sed -nr 's/^(Package|Version): (.*)$/\2/gp' Sources | xargs -L2 >sources.list
-    if extant_package="$(grep "^${dpkg_name} ${new_version}$" packages.list)"; then
+    if extant_package="$(grep "^${dpkg_name} ${real_version}$" packages.list)"; then
         info "extant package: ${extant_package}"
     fi
-    if extant_source="$(grep "^${dpkg_name} ${new_version}$" sources.list)"; then
+    if extant_source="$(grep "^${dpkg_name} ${real_version}$" sources.list)"; then
         info "extant source: ${extant_source}"
     fi
     if [ -n "${extant_package:-}" ] && [ -n "${extant_source:-}" ]; then
-        warning "skipping bloom2deb: ${dpkg_name} ${new_version}"
+        warning "skipping bloom2deb: ${dpkg_name} ${real_version}"
         continue
     fi
-    info "starting bloom2deb: ${dpkg_name} ${new_version}"
+    info "starting bloom2deb: ${dpkg_name} ${real_version}"
     git -C "${release_dir}" checkout "${branch_name}"
     # this is where we override the bloom-release version
-    "${here}/bloom2deb" -C "${release_dir}" -V "${new_version}"
-    info "SUCCESS: BUILT branch ${branch_name}, version ${new_version}"
+    "${here}/bloom2deb" -C "${release_dir}" -V "${real_version}"
+    info "SUCCESS: BUILT branch ${branch_name}, version ${real_version}"
 done <tac.tsort.rosdeps.out
 
-info "SUCCESS: PACKAGED ${upstream_checkout}"
-info "new_version           : ${new_version}"
-info "release_bare          : ${release_bare}"
-info "ros_distro            : ${ros_distro}"
-info "upstream_devel_branch : ${upstream_devel_branch}"
-info "upstream_sha1         : ${upstream_sha1}"
-info "upstream_treeish      : ${upstream_treeish}"
-info "upstream_uri          : ${upstream_uri}"
+info "SUCCESS: PACKAGED ${workdir}"
+info "real_version : ${real_version}"
+info "fake_version : ${fake_version}"
+info "release_bare : ${release_bare}"
+info "ros_distro   : ${ros_distro}"
+info "distribution : ${distribution}"
 
 exit "$?"
