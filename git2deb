@@ -1,0 +1,254 @@
+#!/bin/sh
+
+# florist/git2deb
+
+set -euvx
+
+readonly this="$(readlink -f "$0")"
+readonly here="$(dirname "${this}")"
+readonly whatami="$(basename "${this}")"
+readonly tmpdir="$(mktemp -dt "${whatami}.XXXXXX")"
+
+readonly default_distribution="xenial"
+readonly default_ros_distro="kinetic"
+readonly default_upstream_treeish="HEAD"
+
+log() { echo "${whatami}[$$]: $@" >&2; }
+info() { log "INFO: $@"; }
+warning() { log "WARNING: $@"; }
+error() { log "ERROR: $@"; }
+
+usage() {
+    cat <<EOF
+Usage: $(basename ${this}) [OPTION]...
+Bloom, build, and package a git checkout.
+
+Options
+    -h                 print this usage and return success
+    -f                 force bloom (overwrite extant release repository)
+    -C WORKDIR         run as if started in workdir (default: \$PWD)
+    -D DISTRIBUTION    override distribution (default: ${default_distribution})
+    -R ROS_DISTRO      override ros_distro (default: ${default_ros_distro})
+
+Examples:
+
+    \$ ./$(basename ${this}) ~/code/rapidplan
+
+    \$ ./$(basename ${this}) -f ~/code/rapidplan
+
+    \$ ./$(basename ${this}) -f -D xenial ~/code/rapidplan
+
+    \$ ./$(basename ${this}) -f -D xenial -R kinetic ~/code/rapidplan
+
+EOF
+}
+
+die() {
+    error "$@"
+    usage >&2
+    exit 1
+}
+
+cleanup() {
+    status="$?"
+    rm -rf "${tmpdir}"
+    if command -v docker >&2; then
+        docker system prune --force --filter until=6h >&2 || true
+    fi
+    return "${status}"
+}
+
+# $1 : bare git repository
+# $2 : destination directory
+# rest : git clone args
+safe_git_clone() {
+    src="$1"
+    dst="$2"
+    shift 2
+    if [ -d "${dst}" ]; then
+        warning "exists: ${dst}"
+    else
+        mkdir -vp "${dst}"
+    fi
+    if git clone $@ "${src}" "${dst}"; then
+        return 0
+    fi
+    warning "failure: git clone $@ ${src} ${dst}"
+    if ! extant_remote="$(git -C ${dst} config --get remote.origin.url)"; then
+        error "failure: git -C ${dst} config --get remote.origin.url"
+        return 1
+    fi
+    if ! [ "${src}" = "${extant_remote}" ]; then
+        error "bad remote: need ${src}, have ${extant_remote}"
+        return 1
+    fi
+    if ! git -C "${dst}" fetch --verbose --all; then
+        error "failure: git -C ${dst} fetch --verbose --all"
+        return 1
+    fi
+    if ! git -C "${dst}" submodule update --init --recursive; then
+        error "failure: git -C ${dst} submodule update --init --recursive"
+        return 1
+    fi
+    warning "will use existing clone: ${dst}"
+    return 0
+}
+
+################################################################################
+
+trap cleanup EXIT
+export TMPDIR="${tmpdir}"
+export LC_ALL=C
+
+while getopts ":hfC:D:R:" opt; do
+    case "${opt}" in
+        h)
+            usage
+            exit "$?"
+            ;;
+        f) readonly force_bloom="true" ;;
+        C)
+            if ! workdir="$(readlink -f "${OPTARG}")"; then
+                die "missing path: ${OPTARG}"
+            fi
+            if ! [ -d "${workdir}" ]; then
+                die "missing directory: ${workdir}"
+            fi
+            readonly workdir="${OPTARG}"
+            ;;
+        D) readonly distribution="${OPTARG}" ;;
+        R) readonly ros_distro="${OPTARG}" ;;
+        :) die "Missing argument: -${OPTARG}" ;;
+        \?) die "Invalid option: -${OPTARG}" ;;
+    esac
+done
+shift "$((${OPTIND} - 1))"
+
+#####################
+# VET OPTIONS BEGIN #
+#####################
+
+# workdir
+if [ -n "${workdir:-}" ]; then
+    info "workdir: ${workdir}"
+else
+    readonly workdir="${PWD}"
+    warning "defaulting workdir: ${workdir}"
+fi
+
+# distribution
+if [ -n "${distribution:-}" ]; then
+    info "given distribution: ${distribution}"
+else
+    readonly distribution="${default_distribution}"
+    warning "defaulting distribution: ${distribution}"
+fi
+
+# ros_distro
+if [ -n "${ros_distro:-}" ]; then
+    info "given ros_distro: ${ros_distro}"
+else
+    readonly ros_distro="${default_ros_distro}"
+    warning "defaulting ros_distro: ${ros_distro}"
+fi
+
+###################
+# VET OPTIONS END #
+###################
+
+# create *.orig.tar.gz
+read origtar <<EOF
+$("${here}/scrippies/git2origtar" -C "${workdir}")
+EOF
+readonly origtar="$(readlink -f "${origtar}")"
+readonly origtargz="${origtar}.gz"
+
+# assumes `scrippies/git2origtar` creates a well-formed filename
+readonly package_name="$(basename "${origtar}" .orig.tar | cut -d_ -f1)"
+readonly real_version="$(basename "${origtar}" .orig.tar | cut -d_ -f2)"
+readonly fake_version="$(echo "${real_version}" | cut -d- -f1)"
+readonly release_bare="${PWD}/${package_name}_${real_version}-release.git"
+
+if [ "true" = "${force_bloom:-false}" ] || ! [ -d "${release_bare}" ]; then
+    rm -rf "${origtargz}" "${release_bare}"
+    gzip "${origtar}"
+    mkdir -vp "${release_bare}"
+    info "$(git -C "${release_bare}" init)"
+
+    # > The upstream repository is the repository where you do your development
+    # > and host the source code of your package. This repository can be hosted
+    # > anywhere (even locally) and can be a git, hg, or svn repository or the
+    # > location of an archive (tar.gz only for now, but there are plans for
+    # > tar.bz and zip).
+    #
+    # --- http://wiki.ros.org/bloom/Tutorials/FirstTimeRelease#Preparing_for_Release
+    "${here}/tarball2bloom" \
+        -C "${release_bare}" \
+        -R "${ros_distro}" \
+        -P "${package_name}" \
+        -V "${fake_version}" \
+        "${origtargz}"
+else
+    warning "skipping tarball2bloom"
+fi
+
+readonly release_dir="${release_bare%.git}.dir"
+mkdir -vp "${release_dir}"
+safe_git_clone "${release_bare}" "${release_dir}"
+
+readonly branch_list="${release_dir%.dir}.branch.list"
+git -C "${release_dir}" branch -a >"${branch_list}"
+
+# > [a package name] must only consist of alphanumerics and _ separators
+#
+# -- http://www.ros.org/reps/rep-0144.html#mandatory-rules
+#
+# ..._*BUT*_ catkin will happily build packages with hyphens, too.
+sed -nri "s|^  remotes/origin/(debian/${ros_distro}/${distribution}/[[:alnum:]_-]+)$|\1|gp" "${branch_list}"
+sort -uo "${branch_list}" "${branch_list}"
+
+# uncomment this to avoid "*_example" subprojects
+#sed -ri '/.*_examples$/d' "${branch_list}"
+
+# create dependency list, topo sort, and reverse topo sort
+"${here}/rosdeps" -C "${upstream_checkout}" >rosdeps.out
+tsort <rosdeps.out >tsort.rosdeps.out
+tac <tsort.rosdeps.out >tac.tsort.rosdeps.out
+
+# `bloom2deb` creates a file-local apt repository with `Packages` and `Sources`
+# files in the current working directory.
+touch Packages Sources
+while read package; do
+    dpkg_name="$(echo "ros-${ros_distro}-${package}" | tr '_' '-')"
+    if ! branch_name="$(grep -E "${package}\$" <"${branch_list}")"; then
+        die "package missing branch: ${package}"
+    fi
+    sed -nr 's/^(Package|Version): (.*)$/\2/gp' Packages | xargs -L2 >packages.list
+    sed -nr 's/^(Package|Version): (.*)$/\2/gp' Sources | xargs -L2 >sources.list
+    if extant_package="$(grep "^${dpkg_name} ${new_version}$" packages.list)"; then
+        info "extant package: ${extant_package}"
+    fi
+    if extant_source="$(grep "^${dpkg_name} ${new_version}$" sources.list)"; then
+        info "extant source: ${extant_source}"
+    fi
+    if [ -n "${extant_package:-}" ] && [ -n "${extant_source:-}" ]; then
+        warning "skipping bloom2deb: ${dpkg_name} ${new_version}"
+        continue
+    fi
+    info "starting bloom2deb: ${dpkg_name} ${new_version}"
+    git -C "${release_dir}" checkout "${branch_name}"
+    # this is where we override the bloom-release version
+    "${here}/bloom2deb" -C "${release_dir}" -V "${new_version}"
+    info "SUCCESS: BUILT branch ${branch_name}, version ${new_version}"
+done <tac.tsort.rosdeps.out
+
+info "SUCCESS: PACKAGED ${upstream_checkout}"
+info "new_version           : ${new_version}"
+info "release_bare          : ${release_bare}"
+info "ros_distro            : ${ros_distro}"
+info "upstream_devel_branch : ${upstream_devel_branch}"
+info "upstream_sha1         : ${upstream_sha1}"
+info "upstream_treeish      : ${upstream_treeish}"
+info "upstream_uri          : ${upstream_uri}"
+
+exit "$?"
