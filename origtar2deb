@@ -257,7 +257,7 @@ while read package; do
     info "SUCCESS: BUILT branch ${branch_name}, version ${real_version}"
 done <tac.tsort.rosdeps.out
 
-info "SUCCESS: PACKAGED ${workdir}"
+info "SUCCESS: PACKAGED ${origtar}"
 info "real_version : ${real_version}"
 info "fake_version : ${fake_version}"
 info "release_bare : ${release_bare}"
