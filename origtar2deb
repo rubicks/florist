@@ -172,17 +172,17 @@ fi
 # VET OPTIONS END #
 ###################
 
-readonly origtargz="${origtar}.gz"
-
 # assumes `scrippies/git2origtar` creates a well-formed filename
 readonly package_name="$(basename "${origtar}" .orig.tar | cut -d_ -f1)"
 readonly real_version="$(basename "${origtar}" .orig.tar | cut -d_ -f2)"
 readonly fake_version="$(echo "${real_version}" | cut -d- -f1)"
 readonly release_bare="${PWD}/${package_name}_${real_version}-release.git"
 
+readonly origtargz="${origtar}.gz"
+
 if [ "true" = "${force_bloom:-false}" ] || ! [ -d "${release_bare}" ]; then
     rm -rf "${origtargz}" "${release_bare}"
-    gzip -k "${origtar}"
+    gzip --verbose --keep --best --no-name "${origtar}"
     mkdir -vp "${release_bare}"
     info "$(git -C "${release_bare}" init)"
 
