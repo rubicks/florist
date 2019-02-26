@@ -31,13 +31,13 @@ Options
 
 Examples:
 
-    \$ ./$(basename ${this}) ~/code/rapidplan
+    \$ ./$(basename ${this}) rapidplan_0.1.2-222-g4a6d3cc.orig.tar
 
-    \$ ./$(basename ${this}) -f ~/code/rapidplan
+    \$ ./$(basename ${this}) -f rapidplan_0.1.2-222-g4a6d3cc.orig.tar
 
-    \$ ./$(basename ${this}) -f -D xenial ~/code/rapidplan
+    \$ ./$(basename ${this}) -f -D xenial rapidplan_0.1.2-222-g4a6d3cc.orig.tar
 
-    \$ ./$(basename ${this}) -f -D xenial -R kinetic ~/code/rapidplan
+    \$ ./$(basename ${this}) -f -D xenial -R kinetic rapidplan_0.1.2-222-g4a6d3cc.orig.tar
 
 EOF
 }
@@ -184,7 +184,7 @@ if [ "true" = "${force_bloom:-false}" ] || ! [ -d "${release_bare}" ]; then
     rm -rf "${origtargz}" "${release_bare}"
     gzip --verbose --keep --best --no-name "${origtar}"
     mkdir -vp "${release_bare}"
-    info "$(git -C "${release_bare}" init)"
+    info "$(git init --bare "${release_bare}")"
 
     # > The upstream repository is the repository where you do your development
     # > and host the source code of your package. This repository can be hosted
@@ -203,12 +203,12 @@ else
     warning "skipping tarball2bloom"
 fi
 
-readonly release_dir="${release_bare%.git}.dir"
-mkdir -vp "${release_dir}"
-safe_git_clone "${release_bare}" "${release_dir}"
-
-readonly branch_list="${release_dir%.dir}.branch.list"
-git -C "${release_dir}" branch -a >"${branch_list}"
+readonly branch_list="${release_bare%.git}.branch.list"
+(
+    cd "$(mktemp -d)"
+    git clone "file://${release_bare}" .
+    git branch -a
+) >"${branch_list}"
 
 # > [a package name] must only consist of alphanumerics and _ separators
 #
@@ -227,8 +227,8 @@ sort -uo "${branch_list}" "${branch_list}"
     tar -xf "${origtargz}"
     "${here}/rosdeps"
 ) >rosdeps.out
-tsort <rosdeps.out >tsort.rosdeps.out
-tac <tsort.rosdeps.out >tac.tsort.rosdeps.out
+
+readonly release_dir="${release_bare%.git}.dir"
 
 # `bloom2deb` creates a file-local apt repository with `Packages` and `Sources`
 # files in the current working directory.
@@ -251,11 +251,18 @@ while read package; do
         continue
     fi
     info "starting bloom2deb: ${dpkg_name} ${real_version}"
-    git -C "${release_dir}" checkout "${branch_name}"
+
+    # because bloom hates git-lfs or something
+    rm -rf "${release_dir}"
+    mkdir -vp "${release_dir}"
+    git clone --branch "${branch_name}" "file://${release_bare}" "${release_dir}"
+
     # this is where we override the bloom-release version
     "${here}/bloom2deb" -C "${release_dir}" -V "${real_version}"
     info "SUCCESS: BUILT branch ${branch_name}, version ${real_version}"
-done <tac.tsort.rosdeps.out
+
+    rm -rf "${release_dir}"
+done <rosdeps.out
 
 info "SUCCESS: PACKAGED ${origtar}"
 info "real_version : ${real_version}"

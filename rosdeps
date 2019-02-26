@@ -10,8 +10,8 @@ readonly whatami="$(basename "${here}").$(basename "${this}")"
 readonly tmpdir="$(mktemp -dt "${whatami}.XXXXXX")"
 
 log() { echo "${whatami}[$$]: $@" >&2; }
-inform() { log "INFO: $@"; }
-warn() { log "WARNING: $@"; }
+info() { log "INFO: $@"; }
+warning() { log "WARNING: $@"; }
 error() { log "ERROR: $@"; }
 
 usage() {
@@ -41,7 +41,7 @@ die() {
 cleanup() {
     status="$?"
     rm -rf "${tmpdir}"
-    if command -v docker >&2; then
+    if command -v docker >/dev/null 2>&1; then
         docker system prune --force --filter until=6h >&2 || true
     fi
     return "${status}"
@@ -74,7 +74,26 @@ run_raw() {
         comm -12 "${this_deps}" "${package_list}" \
             | xargs -I {} echo "${this_pkg} {}" >>"${dependency_list}"
     done <"${package_xml_list}"
-    cat "${dependency_list}"
+
+    readonly dependency_list_tsort="$(mktemp -t dependency_list_tsort.XXXXXX)"
+    tsort "${dependency_list}" >"${dependency_list_tsort}"
+
+    # info "dependency_list_tsort: ${dependency_list_tsort}"
+    # while read line; do info "  ${line}"; done <"${dependency_list_tsort}"
+    # info "package_list: ${package_list}"
+    # while read line; do info "  ${line}"; done <"${package_list}"
+    readonly result="$(mktemp -t result.XXXXXX)"
+    (
+        # For each package that IS NOT an intra-catkin-ws dependency and HAS NO
+        # intra-catkin-ws dependencies, it can be built first:
+        grep -vFf "${dependency_list_tsort}" "${package_list}" || true
+
+        # The set of remaining packages (each of which IS an intra-catkin-ws
+        # dependency and/or HAS intra-catkin-ws dependencies) can be built
+        # next, in reverse topologically-sorted order:
+        tac "${dependency_list_tsort}"
+    ) >"${result}"
+    cat "${result}"
 }
 
 run_dockerized() {
@@ -82,7 +101,7 @@ run_dockerized() {
     if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ]; then
         docker image pull "${image_name}" >&2
     else
-        warn "skipping: docker image pull ${image_name}"
+        warning "skipping: docker image pull ${image_name}"
     fi
 
     docker container run \
@@ -135,10 +154,10 @@ done
 shift "$((${OPTIND} - 1))"
 
 if [ -n "${workdir:-}" ]; then
-    inform "workdir: ${workdir}"
+    info "workdir: ${workdir}"
 else
     readonly workdir="${PWD}"
-    warn "defaulting workdir: ${workdir}"
+    warning "defaulting workdir: ${workdir}"
 fi
 
 if [ "true" = "${run_raw:-false}" ]; then

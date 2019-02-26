@@ -156,97 +156,23 @@ fi
 # VET OPTIONS END #
 ###################
 
-# create *.orig.tar.gz
+# create *.orig.tar
 read origtar <<EOF
 $("${here}/scrippies/git2origtar" -C "${workdir}")
 EOF
-readonly origtar="$(readlink -f "${origtar}")"
-readonly origtargz="${origtar}.gz"
-
-# assumes `scrippies/git2origtar` creates a well-formed filename
-readonly package_name="$(basename "${origtar}" .orig.tar | cut -d_ -f1)"
-readonly real_version="$(basename "${origtar}" .orig.tar | cut -d_ -f2)"
-readonly fake_version="$(echo "${real_version}" | cut -d- -f1)"
-readonly release_bare="${PWD}/${package_name}_${real_version}-release.git"
-
-if [ "true" = "${force_bloom:-false}" ] || ! [ -d "${release_bare}" ]; then
-    rm -rf "${origtargz}" "${release_bare}"
-    gzip "${origtar}"
-    mkdir -vp "${release_bare}"
-    info "$(git -C "${release_bare}" init)"
-
-    # > The upstream repository is the repository where you do your development
-    # > and host the source code of your package. This repository can be hosted
-    # > anywhere (even locally) and can be a git, hg, or svn repository or the
-    # > location of an archive (tar.gz only for now, but there are plans for
-    # > tar.bz and zip).
-    #
-    # --- http://wiki.ros.org/bloom/Tutorials/FirstTimeRelease#Preparing_for_Release
-    "${here}/tarball2bloom" \
-        -C "${release_bare}" \
-        -R "${ros_distro}" \
-        -P "${package_name}" \
-        -V "${fake_version}" \
-        "${origtargz}"
-else
-    warning "skipping tarball2bloom"
+if ! [ -n "${origtar}" ]; then
+    die "FAILURE: ${here}/scrippies/git2origtar -C ${workdir}"
+fi
+if ! [ -f "${origtar}" ]; then
+    die "missing file: ${origtar}"
 fi
 
-readonly release_dir="${release_bare%.git}.dir"
-mkdir -vp "${release_dir}"
-safe_git_clone "${release_bare}" "${release_dir}"
+if [ "true" = "${force_bloom:-false}" ]; then
+    opts="-f"
+else
+    opts=""
+fi
 
-readonly branch_list="${release_dir%.dir}.branch.list"
-git -C "${release_dir}" branch -a >"${branch_list}"
-
-# > [a package name] must only consist of alphanumerics and _ separators
-#
-# -- http://www.ros.org/reps/rep-0144.html#mandatory-rules
-#
-# ..._*BUT*_ catkin will happily build packages with hyphens, too.
-sed -nri "s|^  remotes/origin/(debian/${ros_distro}/${distribution}/[[:alnum:]_-]+)$|\1|gp" "${branch_list}"
-sort -uo "${branch_list}" "${branch_list}"
-
-# uncomment this to avoid "*_example" subprojects
-#sed -ri '/.*_examples$/d' "${branch_list}"
-
-# create dependency list, topo sort, and reverse topo sort
-"${here}/rosdeps" -C "${workdir}" >rosdeps.out
-tsort <rosdeps.out >tsort.rosdeps.out
-tac <tsort.rosdeps.out >tac.tsort.rosdeps.out
-
-# `bloom2deb` creates a file-local apt repository with `Packages` and `Sources`
-# files in the current working directory.
-touch Packages Sources
-while read package; do
-    dpkg_name="$(echo "ros-${ros_distro}-${package}" | tr '_' '-')"
-    if ! branch_name="$(grep -E "${package}\$" <"${branch_list}")"; then
-        die "package missing branch: ${package}"
-    fi
-    sed -nr 's/^(Package|Version): (.*)$/\2/gp' Packages | xargs -L2 >packages.list
-    sed -nr 's/^(Package|Version): (.*)$/\2/gp' Sources | xargs -L2 >sources.list
-    if extant_package="$(grep "^${dpkg_name} ${real_version}$" packages.list)"; then
-        info "extant package: ${extant_package}"
-    fi
-    if extant_source="$(grep "^${dpkg_name} ${real_version}$" sources.list)"; then
-        info "extant source: ${extant_source}"
-    fi
-    if [ -n "${extant_package:-}" ] && [ -n "${extant_source:-}" ]; then
-        warning "skipping bloom2deb: ${dpkg_name} ${real_version}"
-        continue
-    fi
-    info "starting bloom2deb: ${dpkg_name} ${real_version}"
-    git -C "${release_dir}" checkout "${branch_name}"
-    # this is where we override the bloom-release version
-    "${here}/bloom2deb" -C "${release_dir}" -V "${real_version}"
-    info "SUCCESS: BUILT branch ${branch_name}, version ${real_version}"
-done <tac.tsort.rosdeps.out
-
-info "SUCCESS: PACKAGED ${workdir}"
-info "real_version : ${real_version}"
-info "fake_version : ${fake_version}"
-info "release_bare : ${release_bare}"
-info "ros_distro   : ${ros_distro}"
-info "distribution : ${distribution}"
+"${here}/origtar2deb" ${opts} -D "${distribution}" -R "${ros_distro}" "${origtar}"
 
 exit "$?"

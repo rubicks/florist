@@ -81,8 +81,10 @@ is_good_release_bare() {
 #   human understandable.
 #
 # -- http://www.ros.org/reps/rep-0144.html#mandatory-rules
+#
+# ..._*BUT*_ catkin will happily build packages with hyphens, too.
 is_good_package_name() {
-    basename "$1" | grep -Eq '^[[:alpha:]][[:alnum:]_]+$'
+    basename "$1" | grep -Eq '^[[:alpha:]][[:alnum:]_-]+$'
 }
 
 is_good_fake_version() {
