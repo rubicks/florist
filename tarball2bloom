@@ -334,7 +334,6 @@ useradd \
     --uid ${DOCKER_HOST_UID} \
     --gid ${DOCKER_HOST_GID} \
     --shell $(command -v sh) \
-    --home $(mktemp -dt luser_home.XXXXXX) \
     --create-home \
     luser
 
