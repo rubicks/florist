@@ -305,7 +305,6 @@ run_dockerized() {
     fi
 
     readonly workdir="$(mktemp -ut workdir.XXXXXX)"
-    readonly luser_home="$(mktemp -ut luser.home.XXXXXX)"
     docker container run \
         --env DOCKER_HOST_GID="$(id -g)" \
         --env DOCKER_HOST_UID="$(id -u)" \
@@ -313,14 +312,12 @@ run_dockerized() {
         --env GIT_CONFIG_USER_EMAIL="$(git config user.email)" \
         --env GIT_CONFIG_USER_NAME="$(git config user.name)" \
         --env HERE="${here}" \
-        --env LUSER_HOME="${luser_home}" \
         --env ORIG_TARBALL="${orig_tarball}" \
         --env PACKAGE_NAME="${package_name}" \
         --env RELEASE_BARE="${release_bare}" \
         --env ROS_DISTRO="${ros_distro}" \
         --env THIS="${this}" \
         --interactive \
-        --mount type=bind,source="${HOME}/.ssh",target="${luser_home}/.ssh",readonly \
         --mount type=bind,source="${here}",target="${here}",readonly \
         --mount type=bind,source="${orig_tarball}",target="${orig_tarball}",readonly \
         --mount type=bind,source="${release_bare}",target="${release_bare}" \
@@ -332,28 +329,17 @@ set -euvx
 
 update-ca-certificates
 
-# "The authenticity of host [REDACTED] can't be established."
-cat >>/etc/ssh/ssh_config <<'SSH_CONFIG'
-Host *
-  StrictHostKeyChecking no
-SSH_CONFIG
-
 groupadd --gid ${DOCKER_HOST_GID} luser
 useradd \
     --uid ${DOCKER_HOST_UID} \
     --gid ${DOCKER_HOST_GID} \
     --shell $(command -v sh) \
-    --home ${LUSER_HOME} \
-    --create-home \
     luser
-
-find ${LUSER_HOME} \
-    ! \( -user ${DOCKER_HOST_UID} -group ${DOCKER_HOST_GID} \) \
-    -exec chown -v ${DOCKER_HOST_UID}:${DOCKER_HOST_GID} {} +
 
 su luser - <<EOSU
 ${THIS} -r -C ${RELEASE_BARE} -R ${ROS_DISTRO} -P ${PACKAGE_NAME} -V ${FAKE_VERSION} ${ORIG_TARBALL}
 EOSU
+
 EOF
 }
 
