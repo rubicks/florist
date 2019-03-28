@@ -25,29 +25,56 @@ special ROS tools.
 > work best with catkin projects, but can also accommodate other types of
 > projects.
 
--- http://bloom.readthedocs.io
+--- http://bloom.readthedocs.io
 
 Yes, it's _designed_ to make package-building easier but falls far short of
 that lofty goal. It's finicky, slow, and actively hostile to package
 maintainers; more on that later.
 
-At any rate, [project bloom][project-bloom] provides a `bloom-release` tool
-that eats an "upstream" ROS project and produces a "release" git
-repository. You don't get any of this for free, mind you; there are strict
-constraints on what can be "bloomed" and doing it for a "fresh" package (one
-for which the corresponding `-release` repository does not yet exist) is a
-*lot* of preparatory work. The [first time][first-time] always hurts.
+At any rate, [project bloom][project-bloom] provides a `bloom-release`
+tool. `bloom-release` takes an "upstream" and produces a "release". You don't
+get any of this for free, mind you; there are strict constraints on what can be
+"bloomed" and doing it for a "fresh" package (one for which the corresponding
+`-release` repository does not yet exist) is a *lot* of preparatory work. The
+[first time][first-time] always hurts.
 
-# Q. What's this "upstream repository"?
+# Q. What's this "upstream"?
 
 The thing holding the source code of interest; i.e., the ROS project you want
-released and packaged. It usually lives in git, but I've heard you can also use
-subversion and even tarballs. To play nice with `bloom-release`, the upstream
-project needs to come correct *vis-a-vis* ROS standards -- your
-`CMakeLists.txt` and `package.xml` files have to be tightly disciplined and the
-whole thing must build and test cleanly.
+released as a package --- or, more often, several packages. As of this writing,
+the `bloom-release` tool [can support][first-time-config] an "Upstream URI" in
+one of four forms:
 
-# Q. What's this "release repository"?
+    Upstream VCS Type:
+      svn
+        URI is a svn repository
+      git
+        Upstream URI is a git repository
+      hg
+        Upstream URI is a hg repository
+      tar
+        Upstream URI is a tarball
+      ['git']:
+
+The default, `git`, works really well --- as long as you don't use [`git
+submodule`][git-submodule] and/or [`git lfs`][git-lfs]. Because non-trivial
+software projects often rely on submodules and LFS, this document hereafter
+assumes the Upstream URI references a tarball. By "tarball", what the `bloom`
+maintainers [specifically mean][targz-specifically] is a `gzip`-compressed
+`tar`-archive with a `.tar.gz` file extension.
+
+> This repository can be hosted anywhere (even locally) and can be ... an
+> archive (tar.gz only for now, but there are plans for tar.bz and zip).
+
+--- https://wiki.ros.org/bloom/Tutorials/FirstTimeRelease#Preparing_for_Release
+
+Yep, can't wait for that forthcoming support for `tar.bzip` and `zip`. At any
+rate, to play nice with `bloom-release`, your upstream needs to come correct
+*vis-a-vis* ROS standards. Your `CMakeLists.txt` and `package.xml` files have
+to be tightly disciplined and the whole thing must build and test cleanly ---
+preferrably with `catkin`.
+
+# Q. What's this "release"?
 
 The release repository is embodiment for every release (thus far) of the
 upstream repository. It's usually a git repository with an embarrassingly large
@@ -72,8 +99,8 @@ produce `sns_ik-release`, then the latter will contain the following branches:
 * `debian/indigo/trusty/sns_ik_lib`
 
 The result is a teeming plague of branches writhing over the `git log --all
---graph --oneline`, not unlike an infestation of maggots burrowing through
-week-old roadkill.
+--graph --oneline` output, not unlike an infestation of maggots burrowing
+through a week-old roadkill.
 
 [gh-sns-ik]:https://github.com/RethinkRobotics-opensource/sns_ik
 
@@ -154,3 +181,7 @@ assumed defaults.
 [wiki-bloom]:http://wiki.ros.org/bloom
 [project-bloom]:https://pypi.org/project/bloom
 [first-time]:http://wiki.ros.org/bloom/Tutorials/FirstTimeRelease
+[first-time-config]:https://wiki.ros.org/bloom/Tutorials/FirstTimeRelease#Configure_a_Release_Track
+[git-submodule]:https://git-scm.com/book/en/v2/Git-Tools-Submodules
+[git-lfs]:https://git-lfs.github.com/
+[targz-specifically]:https://github.com/ros-infrastructure/bloom/commit/b3f59bfc03e00806451ad2b054819291a45844f2#diff-43085dccbe9f83cd09c4636a5543faacR288
