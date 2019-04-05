@@ -94,12 +94,13 @@ safe_git_clone() {
 }
 
 is_good_origtar() {
-    if ! basename "$1" | grep -Eq '^[a-z0-9][a-z0-9.+-]+_[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-g[0-9a-f]{7,40}\.orig\.tar$'; then
+    local regex='^[a-z0-9][a-z0-9.+-]+_[0-9]+([.][0-9]+){2}-[0-9]+-g[0-9a-f]{7,40}[.]orig[.]tar([.](gz|bz2|xz))?$'
+    if ! basename "$1" | grep -Eq "${regex}"; then
         error "bad file name: $1"
         return 1
     fi
-    if ! file -b "$1" | grep -q '^POSIX tar archive'; then
-        error "bad file type: $(file -b "$1")"
+    if ! file -bz "$1" | grep -q '^POSIX tar archive'; then
+        error "bad file type: $(file -bz "$1")"
         return 1
     fi
     return 0
@@ -173,16 +174,28 @@ fi
 ###################
 
 # assumes `scrippies/git2origtar` creates a well-formed filename
-readonly package_name="$(basename "${origtar}" .orig.tar | cut -d_ -f1)"
-readonly real_version="$(basename "${origtar}" .orig.tar | cut -d_ -f2)"
+readonly package_name="$(basename "${origtar%.orig.tar*}" | cut -d_ -f1)"
+readonly real_version="$(basename "${origtar%.orig.tar*}" | cut -d_ -f2)"
 readonly fake_version="$(echo "${real_version}" | cut -d- -f1)"
 readonly release_bare="${PWD}/${package_name}_${real_version}-release.git"
 
-readonly origtargz="${origtar}.gz"
+readonly origtargz="${origtar%.orig.tar*}.orig.tar.gz"
+case "${origtar}" in
+    *.tar)
+        decompress_cmd="cat" ;;
+    *.tar.gz)
+        decompress_cmd="gzip --no-name -cd" ;;
+    *.tar.bz2)
+        decompress_cmd="bzip2 -cd" ;;
+    *.tar.xz)
+        decompress_cmd="xz -cd" ;;
+    *)
+        die "bad file extension: ${origtar}" ;;
+esac
 
 if [ "true" = "${force_bloom:-false}" ] || ! [ -d "${release_bare}" ]; then
-    rm -rf "${origtargz}" "${release_bare}"
-    gzip --verbose --keep --best --no-name "${origtar}"
+    eval "${decompress_cmd}" <"${origtar}" | gzip --no-name -c >"${origtargz}"
+    rm -rf "${release_bare}"
     mkdir -vp "${release_bare}"
     info "$(git init --bare "${release_bare}")"
 
