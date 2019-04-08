@@ -16,7 +16,7 @@ error() { log "ERROR: $@"; }
 
 usage() {
     cat <<EOF
-Usage: $(basename ${this}) [OPTION]... [-- [buildpackage option]...]
+Usage: $0 [OPTION]... [-- [buildpackage option]...]
 Build debian package artifacts from local bloomed RELEASE_DIR.
 
 Options
@@ -39,7 +39,7 @@ Notes:
 
 Example:
 
-    \$ $(basename ${this}) -C ~/rapidplan-release -V 0.1.0-9-g8eb4b80 -- --source-option=-Dvcs-ref=0.1.0
+    \$ $0 -C ~/rapidplan-release -V 0.1.0-9-g8eb4b80 -- --source-option=-Dvcs-ref=0.1.0
 
 EOF
 }
@@ -60,11 +60,9 @@ cleanup() {
 }
 
 run_raw() {
-    readonly oldpwd="${PWD}"
-    readonly newdir="$(mktemp -u).$(basename "${release_dir}")"
-    mkdir -vp "${newdir}"
+    env | sort
     (
-        cd "${newdir}"
+        cd "$(mktemp -dt "$(basename "${release_dir}").XXXXXX")"
         tar -cf- -C "${release_dir}" . | tar -xf-
 
         gbp dch \
@@ -86,7 +84,7 @@ run_raw() {
             --git-upstream-tree="${release_branch}" \
             -j"$(nproc)" -us -uc --source-option='-i.*' ${buildpackage_opts}
 
-        find .. -maxdepth 1 -type f -exec cp -v {} "${oldpwd}" \;
+        find .. -maxdepth 1 -type f -exec cp -v {} "${OLDPWD}" \;
     )
 }
 
