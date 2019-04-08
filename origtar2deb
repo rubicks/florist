@@ -20,7 +20,7 @@ error() { log "ERROR: $@"; }
 
 usage() {
     cat <<EOF
-Usage: $(basename ${this}) [OPTION]... ORIGTAR
+Usage: $0 [OPTION]... ORIGTAR
 Bloom, build, and package an orig tarball.
 
 Options
@@ -31,13 +31,13 @@ Options
 
 Examples:
 
-    \$ ./$(basename ${this}) rapidplan_0.1.2-222-g4a6d3cc.orig.tar
+    \$ $0 rapidplan_0.1.2-222-g4a6d3cc.orig.tar
 
-    \$ ./$(basename ${this}) -f rapidplan_0.1.2-222-g4a6d3cc.orig.tar
+    \$ $0 -f rapidplan_0.1.2-222-g4a6d3cc.orig.tar
 
-    \$ ./$(basename ${this}) -f -D xenial rapidplan_0.1.2-222-g4a6d3cc.orig.tar
+    \$ $0 -f -D xenial rapidplan_0.1.2-222-g4a6d3cc.orig.tar
 
-    \$ ./$(basename ${this}) -f -D xenial -R kinetic rapidplan_0.1.2-222-g4a6d3cc.orig.tar
+    \$ $0 -f -D xenial -R kinetic rapidplan_0.1.2-222-g4a6d3cc.orig.tar
 
 EOF
 }
@@ -182,19 +182,21 @@ readonly release_bare="${PWD}/${package_name}_${real_version}-release.git"
 readonly origtargz="${origtar%.orig.tar*}.orig.tar.gz"
 case "${origtar}" in
     *.tar)
-        decompress_cmd="cat" ;;
-    *.tar.gz)
-        decompress_cmd="gzip --no-name -cd" ;;
+        gzip --no-name -c <"${origtar}" >"${origtargz}" ;;
     *.tar.bz2)
-        decompress_cmd="bzip2 -cd" ;;
+        bzip2 -cd <"${origtar}" | gzip --no-name -c >"${origtargz}" ;;
     *.tar.xz)
-        decompress_cmd="xz -cd" ;;
+        xz -cd <"${origtar}" | gzip --no-name -c >"${origtargz}" ;;
+    *.tar.gz)
+        if [ "${origtar}" != "${origtargz}" ]; then
+            die "${origtar} != ${origtargz}"
+        fi
+        ;;
     *)
-        die "bad file extension: ${origtar}" ;;
+        die "bad origtar: ${origtar}" ;;
 esac
 
 if [ "true" = "${force_bloom:-false}" ] || ! [ -d "${release_bare}" ]; then
-    eval "${decompress_cmd}" <"${origtar}" | gzip --no-name -c >"${origtargz}"
     rm -rf "${release_bare}"
     mkdir -vp "${release_bare}"
     info "$(git init --bare "${release_bare}")"
