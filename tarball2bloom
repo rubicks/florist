@@ -6,7 +6,7 @@ set -euvx
 
 readonly this="$(readlink -f "$0")"
 readonly here="$(dirname "${this}")"
-readonly whatami="$(basename "${here}").$(basename "${this}")"
+readonly whatami="$(basename "${this}")"
 readonly tmpdir="$(mktemp -dt "${whatami}.XXXXXX")"
 
 readonly default_ros_distro="kinetic"
@@ -19,30 +19,30 @@ error() { log "ERROR: $@"; }
 
 usage() {
     cat <<EOF
-Usage: $(basename ${this}) [OPTION]... ORIG_TARBALL
+Usage: $0 [OPTION]... ORIG_TARBALL
 Bloom the given ORIG_TARBALL into a local bare git release repository.
 
 Options
     -h                 print this usage and return success
-    -C RELEASE_BARE    bloom into RELEASE_BARE (default: based on UPSTREAM_TARBALL)
+    -C RELEASE_BARE    bloom into RELEASE_BARE (default: \${ORIG_TARBALL%.orig.tar.gz}.git)
     -R ROS_DISTRO      bloom for ROS_DISTRO (default: ${default_ros_distro})
     -P PACKAGE_NAME    override package name (default: \${ORIG_TARBALL%%_*})
     -V FAKE_VERSION    override fake version (default: \$(echo \${ORIG_TARBALL} | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+'))
 
 Examples:
 
-    \$ ./$(basename ${this}) rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
+    \$ $0 rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
 
-    \$ ./$(basename ${this}) \\
+    \$ $0 \\
     >      -C rapidplan-release_0.1.2-118-gd75c1a7.git \\
     >      rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
 
-    \$ ./$(basename ${this}) \\
+    \$ $0 \\
     >      -C rapidplan-release_0.1.2-118-gd75c1a7.git \\
     >      -R ${default_ros_distro} \\
     >      rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
 
-    \$ ./$(basename ${this}) \\
+    \$ $0 \\
     >      -C rapidplan-release_0.1.2-118-gd75c1a7.git \\
     >      -R ${default_ros_distro} \\
     >      -V 0.1.2 \\
