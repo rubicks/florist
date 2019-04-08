@@ -131,7 +131,7 @@ run_raw() {
     else
         die "undefined: ros_distro"
     fi
-    
+
     if [ -n "${package_name:-}" ]; then
         export package_name
     else
@@ -143,13 +143,13 @@ run_raw() {
     else
         die "undefined: fake_version"
     fi
-    
+
     if [ -n "${orig_tarball:-}" ]; then
         export orig_tarball
     else
         die "undefined: orig_tarball"
     fi
-    
+
     readonly expect_script="$(mktemp -t expect_script.XXXXXX)"
     envsubst >"${expect_script}" <<'EOF'
 set timeout 30
@@ -412,7 +412,7 @@ if ! [ -f "${orig_tarball}" ]; then
     die "not a file: ${orig_tarball}"
 fi
 readonly orig_tarball="${orig_tarball}"
-   
+
 # release_bare
 if [ -n "${release_bare:-}" ]; then
     info "given release_bare: ${release_bare}"

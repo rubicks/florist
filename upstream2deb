@@ -365,14 +365,14 @@ do_bloom() {
 }
 
 if [ -d "${release_bare}" ]; then
-        warning "extant release_bare: ${release_bare}"
-        if [ "true" = "${force_bloom:-false}" ]; then
-            warning "forcing bloom as requested"
-            find "${release_bare}" -mindepth 1 -delete
-            do_bloom
-        else
-            warning "skipping bloom"
-        fi
+    warning "extant release_bare: ${release_bare}"
+    if [ "true" = "${force_bloom:-false}" ]; then
+        warning "forcing bloom as requested"
+        find "${release_bare}" -mindepth 1 -delete
+        do_bloom
+    else
+        warning "skipping bloom"
+    fi
 else
     do_bloom
 fi

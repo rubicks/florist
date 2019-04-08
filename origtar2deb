@@ -182,18 +182,22 @@ readonly release_bare="${PWD}/${package_name}_${real_version}-release.git"
 readonly origtargz="${origtar%.orig.tar*}.orig.tar.gz"
 case "${origtar}" in
     *.tar)
-        gzip --no-name -c <"${origtar}" >"${origtargz}" ;;
+        gzip --no-name -c <"${origtar}" >"${origtargz}"
+        ;;
     *.tar.bz2)
-        bzip2 -cd <"${origtar}" | gzip --no-name -c >"${origtargz}" ;;
+        bzip2 -cd <"${origtar}" | gzip --no-name -c >"${origtargz}"
+        ;;
     *.tar.xz)
-        xz -cd <"${origtar}" | gzip --no-name -c >"${origtargz}" ;;
+        xz -cd <"${origtar}" | gzip --no-name -c >"${origtargz}"
+        ;;
     *.tar.gz)
         if [ "${origtar}" != "${origtargz}" ]; then
             die "${origtar} != ${origtargz}"
         fi
         ;;
     *)
-        die "bad origtar: ${origtar}" ;;
+        die "bad origtar: ${origtar}"
+        ;;
 esac
 
 if [ "true" = "${force_bloom:-false}" ] || ! [ -d "${release_bare}" ]; then
