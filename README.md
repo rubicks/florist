@@ -74,11 +74,16 @@ rate, to play nice with `bloom-release`, your upstream needs to come correct
 to be tightly disciplined and the whole thing must build and test cleanly ---
 preferrably with `catkin`.
 
+[git-submodule]:https://git-scm.com/book/en/v2/Git-Tools-Submodules
+[git-lfs]:https://git-lfs.github.com/
+[targz-specifically]:https://github.com/ros-infrastructure/bloom/commit/b3f59bfc03e00806451ad2b054819291a45844f2#diff-43085dccbe9f83cd09c4636a5543faacR288
+
+
 # Q. What's this "release"?
 
 The release repository is embodiment for every release (thus far) of the
-upstream repository. It's usually a git repository with an embarrassingly large
-quantity of branches, each named for:
+upstream repository. It's usually a [**bare** git repository][git-init-bare]
+with an embarrassingly large quantity of branches, each named for:
 
 * packaging methodology (e.g., `rpm`, `debian`)
 * ROS distribution (e.g., `indigo`, `kinetic`, `melodic`)
@@ -86,7 +91,7 @@ quantity of branches, each named for:
 * package name (e.g., `ros_comm`, `sns_ik`, `orocos_kdl`)
 
 Within the given git repository ~~victim~~ destination, `bloom-release` will
-produce a branch for each member of the cartesian expansion of the
+produce a branch for each element of the _cartesian expansion_ of the
 aforementioned attributes.
 
 Worse still, for a given package, every _sub-project_ gets its own branch,
@@ -102,35 +107,56 @@ The result is a teeming plague of branches writhing over the `git log --all
 --graph --oneline` output, not unlike an infestation of maggots burrowing
 through a week-old roadkill.
 
+[git-init-bare]:https://git-scm.com/docs/git-init#Documentation/git-init.txt---bare
 [gh-sns-ik]:https://github.com/RethinkRobotics-opensource/sns_ik
 
 # Q. How do I make a release repository?
 
-Use the `upstream2bloom` script in this project.
+Use the `tarball2bloom` script in this project.
 
-    $ ./upstream2bloom -h
-    Usage: upstream2bloom [OPTION]... UPSTREAM_URI
-    Bloom the given UPSTREAM_URI into a local directory.
+    $ ./tarball2bloom -h
+    Usage: ./tarball2bloom [OPTION]... ORIG_TARBALL
+    Bloom the given ORIG_TARBALL into a local bare git release repository.
 
     Options
-        -h               print this usage and return success
-        -C DIR           run as if started in DIR (default: temporary directory)
-        -R ROS_DISTRO    bloom the given ROS distribution (default: indigo)
+        -h                 print this usage and return success
+        -C RELEASE_BARE    bloom into RELEASE_BARE (default: ${ORIG_TARBALL%.orig.tar.gz}.git)
+        -R ROS_DISTRO      bloom for ROS_DISTRO (default: kinetic)
+        -P PACKAGE_NAME    override package name (default: ${ORIG_TARBALL%%_*})
+        -V FAKE_VERSION    override fake version (default: $(echo ${ORIG_TARBALL} | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+'))
 
-    Example:
-        upstream2bloom -C ~/code/ros_comm-release https://github.com/RethinkRobotics-opensource/ros_comm.git
+    Examples:
+
+        $ ./tarball2bloom rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
+
+        $ ./tarball2bloom \
+        >      -C rapidplan-release_0.1.2-118-gd75c1a7.git \
+        >      rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
+
+        $ ./tarball2bloom \
+        >      -C rapidplan-release_0.1.2-118-gd75c1a7.git \
+        >      -R kinetic \
+        >      rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
+
+        $ ./tarball2bloom \
+        >      -C rapidplan-release_0.1.2-118-gd75c1a7.git \
+        >      -R kinetic \
+        >      -V 0.1.2 \
+        >      rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
+
 
 # Q. How do I make debian artifacts?
 
 Use the `bloom2deb` script in this project.
 
     $ ./bloom2deb -h
-    Usage: bloom2deb [OPTION]... [-- [buildpackage option]...]
+    Usage: ./bloom2deb [OPTION]... [-- [buildpackage option]...]
     Build debian package artifacts from local bloomed RELEASE_DIR.
 
     Options
         -h                print this usage and return success
         -C RELEASE_DIR    run as if started in RELEASE_DIR (default: $PWD)
+        -V NEW_VERSION    override the bloom-release version
 
     Notes:
 
@@ -141,39 +167,40 @@ Use the `bloom2deb` script in this project.
 
         Examples:
 
-            * debian/indigo/trusty/ros_comm
+            * debian/kinetic/xenial/ros_comm
             * debian/kinetic/xenial/sns_ik
             * debian/melodic/bionic/orocos_kdl
 
     Example:
-        bloom2deb -C ~/code/ros_comm-release -- --source-option=-Dvcs-ref=1.11.8
+
+        $ ./bloom2deb -C ~/rapidplan-release -V 0.1.0-9-g8eb4b80 -- --source-option=-Dvcs-ref=0.1.0
+
 
 # Q. How do I bloom and package everything at once?
 
-Use the `upstream2deb` script in this project; it wraps invocations to
-`upstream2bloom` and `bloom2deb`. A word of warning: you may not want some the
+Use the `origtar2deb` script in this project; it wraps invocations to
+`tarball2bloom` and `bloom2deb`. A word of warning: you may not want some the
 assumed defaults.
 
-    Usage: upstream2deb [OPTION]... UPSTREAM_URI
-    Bloom the given UPSTREAM_URI into local directory (bare git repository).
+    $ ./origtar2deb -h
+    Usage: ./origtar2deb [OPTION]... ORIGTAR
+    Bloom, build, and package an orig tarball.
 
     Options
-        -h                          print this usage and return success
-        -D DISTRIBUTION             ubuntu distribution codename (default: trusty)
-        -R ROS_DISTRO               bloom the given ROS distribution (default: indigo)
-        -b UPSTREAM_DEVEL_BRANCH    upstream devel branch (default: ${ROS_DISTRO}-devel)
-        -V UPSTREAM_VERSION         upstream version (default: :{auto})
+        -h                 print this usage and return success
+        -f                 force bloom (overwrite extant release repository)
+        -D DISTRIBUTION    override distribution (default: xenial)
+        -R ROS_DISTRO      override ros_distro (default: kinetic)
 
     Examples:
-        $ upstream2deb \
-        >     -b indigo-rethink \
-        >     https://github.com/RethinkRobotics-opensource/ros_comm.git
-        $ upstream2deb \
-        >     -D trusty \
-        >     -R indigo \
-        >     -b indigo-devel \
-        >     -V 0.2.1 \
-        >     https://github.com/RethinkRobotics-opensource/sns_ik.git
+
+        $ ./origtar2deb rapidplan_0.1.2-222-g4a6d3cc.orig.tar
+
+        $ ./origtar2deb -f rapidplan_0.1.2-222-g4a6d3cc.orig.tar
+
+        $ ./origtar2deb -f -D xenial rapidplan_0.1.2-222-g4a6d3cc.orig.tar
+
+        $ ./origtar2deb -f -D xenial -R kinetic rapidplan_0.1.2-222-g4a6d3cc.orig.tar
 
 
 [ros]:http://www.ros.org
@@ -182,6 +209,3 @@ assumed defaults.
 [project-bloom]:https://pypi.org/project/bloom
 [first-time]:http://wiki.ros.org/bloom/Tutorials/FirstTimeRelease
 [first-time-config]:https://wiki.ros.org/bloom/Tutorials/FirstTimeRelease#Configure_a_Release_Track
-[git-submodule]:https://git-scm.com/book/en/v2/Git-Tools-Submodules
-[git-lfs]:https://git-lfs.github.com/
-[targz-specifically]:https://github.com/ros-infrastructure/bloom/commit/b3f59bfc03e00806451ad2b054819291a45844f2#diff-43085dccbe9f83cd09c4636a5543faacR288
