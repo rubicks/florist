@@ -259,10 +259,10 @@ while read package; do
     fi
     sed -nr 's/^(Package|Version): (.*)$/\2/gp' Packages | xargs -L2 >packages.list
     sed -nr 's/^(Package|Version): (.*)$/\2/gp' Sources | xargs -L2 >sources.list
-    if extant_package="$(grep "^${dpkg_name} ${real_version}$" packages.list)"; then
+    if extant_package="$(grep "^${dpkg_name} ${real_version}" packages.list)"; then
         info "extant package: ${extant_package}"
     fi
-    if extant_source="$(grep "^${dpkg_name} ${real_version}$" sources.list)"; then
+    if extant_source="$(grep "^${dpkg_name} ${real_version}" sources.list)"; then
         info "extant source: ${extant_source}"
     fi
     if [ -n "${extant_package:-}" ] && [ -n "${extant_source:-}" ]; then

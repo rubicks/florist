@@ -61,6 +61,7 @@ cleanup() {
 
 run_raw() {
     env | sort
+    readonly issue_net="$(tr -dc '[:alnum:]' </etc/issue.net | tr '[:upper:]' '[:lower:]')"
     (
         cd "$(mktemp -dt "$(basename "${release_dir}").XXXXXX")"
         tar -cf- -C "${release_dir}" . | tar -xf-
@@ -69,7 +70,7 @@ run_raw() {
             --verbose \
             --ignore-branch \
             --release \
-            --new-version="${new_version}" \
+            --new-version="${new_version}-${issue_net}" \
             --since=HEAD \
             --spawn-editor=never \
             "automated build via $(basename "${this}")"
