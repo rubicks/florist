@@ -97,7 +97,7 @@ run_dockerized() {
     else
         warning "skipping: docker image pull ${image_name}"
     fi
-    docker image inspect "${image_name}"
+    docker image inspect "${image_name}" >&2
 
     readonly workdir="$(mktemp -u).workdir"
     docker container run \
