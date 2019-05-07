@@ -10,9 +10,9 @@ readonly whatami="$(basename "${here}").$(basename "${this}")"
 readonly tmpdir="$(mktemp -dt "${whatami}.XXXXXX")"
 
 log() { echo "${whatami}[$$]: $@" >&2; }
-inform() { log "INFO: $@"; }
-warn() { log "WARNING: $@"; }
 error() { log "ERROR: $@"; }
+warning() { log "WARNING: $@"; }
+info() { log "INFO: $@"; }
 
 usage() {
     cat <<EOF
@@ -91,11 +91,12 @@ run_raw() {
 
 run_dockerized() {
     readonly image_name="registry.gitlab.com/realtime-robotics/ros-dpkg:${ros_distro}"
-    if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ]; then
+    if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ] || ! docker image inspect "${image_name}"; then
         docker image pull "${image_name}"
     else
-        warn "skipping: docker image pull ${image_name}"
+        warning "skipping: docker image pull ${image_name}"
     fi
+    docker image inspect "${image_name}"
 
     readonly workdir="$(mktemp -u).workdir"
     docker container run \
@@ -164,9 +165,17 @@ mk-build-deps \
     "${RELEASE_DIR}/debian/control"
 
 groupadd -g "${DOCKER_HOST_GID}" luser
-useradd -d $(mktemp -dt luser.home.XXXXXX) -u "${DOCKER_HOST_UID}" -g "${DOCKER_HOST_GID}" luser
-chown -cR ${DOCKER_HOST_UID}:${DOCKER_HOST_GID} $(getent passwd luser | cut -d: -f6) ${PWD}
-su luser -c "${THIS} -r -C ${RELEASE_DIR} -V ${NEW_VERSION} -- ${BUILDPACKAGE_OPTS}"
+useradd \
+    -d $(mktemp -ut home_luser.XXXXXX) \
+    -g "${DOCKER_HOST_GID}" \
+    -s "$(command -v sh)" \
+    -u "${DOCKER_HOST_UID}" \
+    luser
+
+nice -n19 su luser <<SU_LUSER
+${THIS} -r -C ${RELEASE_DIR} -V ${NEW_VERSION} -- ${BUILDPACKAGE_OPTS}
+SU_LUSER
+
 EOF
 }
 
@@ -176,11 +185,7 @@ save() {
     echo " "
 }
 
-#############################
-# ######################### #
-# # REAL WORK STARTS HERE # #
-# ######################### #
-#############################
+################################################################################
 
 trap cleanup EXIT
 export TMPDIR="${tmpdir}"
@@ -206,10 +211,10 @@ shift "$((${OPTIND} - 1))"
 readonly buildpackage_opts="$(save "$@")"
 
 if [ -n "${release_dir:-}" ]; then
-    inform "release_dir: ${release_dir}"
+    info "release_dir: ${release_dir}"
 else
     readonly release_dir="${PWD}"
-    warn "defaulting release_dir: ${release_dir}"
+    warning "defaulting release_dir: ${release_dir}"
 fi
 
 if ! git -C "${release_dir}" status; then
@@ -233,10 +238,10 @@ readonly distribution="$(echo "${release_branch}" | cut -d/ -f3)"
 readonly package_name="$(echo "${release_branch}" | cut -d/ -f4)"
 
 if [ -n "${new_version:-}" ]; then
-    inform "new_version: ${new_version}"
+    info "new_version: ${new_version}"
 else
     readonly new_version="$(dpkg-parsechangelog -l ${release_dir}/debian/changelog --show-field Version)}"
-    warn "defaulting new_version: ${new_version}"
+    warning "defaulting new_version: ${new_version}"
 fi
 
 if [ "true" = "${run_raw:-false}" ]; then
