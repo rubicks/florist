@@ -91,7 +91,8 @@ run_raw() {
 
 run_dockerized() {
     readonly image_name="registry.gitlab.com/realtime-robotics/ros-dpkg:${ros_distro}"
-    if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ] || ! docker image inspect "${image_name}"; then
+    if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ] \
+        || ! docker image inspect "${image_name}" >/dev/null 2>&1; then
         docker image pull "${image_name}"
     else
         warning "skipping: docker image pull ${image_name}"
