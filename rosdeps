@@ -6,7 +6,7 @@ set -eu
 
 readonly this="$(readlink -f "$0")"
 readonly here="$(dirname "${this}")"
-readonly whatami="$(basename "${here}").$(basename "${this}")"
+readonly whatami="$(basename "${this}")"
 readonly tmpdir="$(mktemp -dt "${whatami}.XXXXXX")"
 
 log() { echo "${whatami}[$$]: $@" >&2; }
@@ -16,7 +16,7 @@ error() { log "ERROR: $@"; }
 
 usage() {
     cat <<EOF
-Usage: $(basename ${this}) [OPTION]...
+Usage: $0 [OPTION]...
 Enumerate ros packages and print dependencies.
 
 Options
@@ -25,9 +25,9 @@ Options
 
 Examples:
 
-    \$ ./$(basename ${this})
+    \$ ./$0
 
-    \$ ./$(basename ${this}) -C ~/code/rapidplan
+    \$ ./$0 -C ~/code/rapidplan
 
 EOF
 }
@@ -123,11 +123,7 @@ nice "${THIS}" -r -C "${WORKDIR}"
 EOF
 }
 
-#############################
-# ######################### #
-# # REAL WORK STARTS HERE # #
-# ######################### #
-#############################
+################################################################################
 
 trap cleanup EXIT
 export TMPDIR="${tmpdir}"
