@@ -100,7 +100,7 @@ run_dockerized() {
     readonly image_name="registry.gitlab.com/realtime-neil/bloomer"
     if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ] \
         || ! docker image inspect "${image_name}" >/dev/null 2>&1; then
-        docker image pull "${image_name}"
+        docker image pull "${image_name}" >&2
     else
         warning "skipping: docker image pull ${image_name}"
     fi
