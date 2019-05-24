@@ -152,7 +152,7 @@ run_raw() {
 
     readonly expect_script="$(mktemp -t expect_script.XXXXXX)"
     envsubst >"${expect_script}" <<'EOF'
-set timeout 30
+set timeout 60
 
 spawn \
   bloom-release \
