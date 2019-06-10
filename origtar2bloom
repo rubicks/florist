@@ -1,0 +1,595 @@
+#!/bin/sh
+
+# florist/origtar2bloom
+
+set -euvx
+
+readonly this="$(readlink -f "$0")"
+readonly here="$(dirname "${this}")"
+readonly whatami="$(basename "${this}")"
+readonly tmpdir="$(mktemp -dt "${whatami}.XXXXXX")"
+
+readonly default_ros_distro="kinetic"
+
+log() { echo "${whatami}[$$]: $@" >&2; }
+info() { log "INFO: $@"; }
+warning() { log "WARNING: $@"; }
+error() { log "ERROR: $@"; }
+
+usage() {
+    cat <<EOF
+Usage: $0 [OPTION]... ORIG_TARBALL
+Bloom the given ORIG_TARBALL into a local bare git release repository.
+
+Options
+    -h                 print this usage and return success
+    -C RELEASE_BARE    bloom into RELEASE_BARE (default: \${ORIG_TARBALL%.orig.tar*}.git)
+    -P PACKAGE_NAME    override package name (default: \${ORIG_TARBALL%%_*})
+    -V FAKE_VERSION    override fake version (default: \$(echo \${ORIG_TARBALL} | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+'))
+    -R ROS_DISTRO      bloom for ROS_DISTRO (default: ${default_ros_distro})
+
+Examples:
+
+    \$ $0 rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
+
+    \$ $0 \\
+    >      -C rapidplan-release_0.1.2-118-gd75c1a7.git \\
+    >      rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
+
+    \$ $0 \\
+    >      -C rapidplan-release_0.1.2-118-gd75c1a7.git \\
+    >      -R ${default_ros_distro} \\
+    >      rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
+
+    \$ $0 \\
+    >      -C rapidplan-release_0.1.2-118-gd75c1a7.git \\
+    >      -R ${default_ros_distro} \\
+    >      -V 0.1.2 \\
+    >      rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
+
+EOF
+}
+
+die() {
+    error "$@"
+    usage >&2
+    exit 1
+}
+
+cleanup() {
+    status="$?"
+    rm -rf "${tmpdir}"
+    if command -v docker >&2; then
+        docker system prune --force --filter until=6h >&2 || true
+    fi
+    return "${status}"
+}
+
+ends_with() { [ "${1}" != "${1%${2}}" ]; }
+
+is_good_release_bare() {
+    test -d "$(readlink -f "$1")"
+}
+
+# * it must only consist of alphanumerics and _ separators. Other symbols might
+#   not be supported by some OSes (e.g. unicode characters) or would make it
+#   hard to follow OSes conventions
+#
+# * they must be at least two characters long and must start with an alphabetic
+#   character. This rule is simply to force the name of the package to be more
+#   human understandable.
+#
+# -- http://www.ros.org/reps/rep-0144.html#mandatory-rules
+#
+# ..._*BUT*_ catkin will happily build packages with hyphens, too.
+is_good_package_name() {
+    basename "$1" | grep -Eq '^[[:alpha:]][[:alnum:]_-]+$'
+}
+
+is_good_fake_version() {
+    basename "$1" | grep -Eq '^[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+$'
+}
+
+run_raw() {
+    if ! git config --global user.name; then
+        git config --global user.name "$(whoami)"
+        warning "defaulting git config --global user.name: $(git config --global user.name)"
+    fi
+    if ! git config --global user.email; then
+        git config --global user.email "$(whoami)@$(hostname)"
+        warning "defaulting git config --global user.email: $(git config --global user.email)"
+    fi
+
+    # `bloom-release` is stupid because it implicitly invokes `rosdep update`
+    # for you, but only _after_ it performs several **extremely**
+    # time-consuming tasks. **AND** it eats the `rosdep update` error messages
+    # because of course it does. To fail faster on a bad `rosdep`
+    # configuration, we need an explicit `rosdep update` before we attempt to
+    # bloom.
+    #
+    # -- neil 2018.12.13
+    rosdep update --verbose
+
+    # `bloom-release` is stupid because it forces interactivity by reading from
+    # the terminal device instead of stdin. To defeat this, we need to fight
+    # stupid with stupid: use `expect` to fake the interactive terminal. If you
+    # know a better way to force bloom-release to run non-interactively, I
+    # encourage you to re-write this horror.
+    #
+    # -- neil 2018.07.31
+    bloom-release --version
+
+    if [ -n "${release_bare:-}" ]; then
+        export release_bare
+    else
+        die "undefined: release_bare"
+    fi
+
+    if [ -n "${ros_distro:-}" ]; then
+        export ros_distro
+    else
+        die "undefined: ros_distro"
+    fi
+
+    if [ -n "${package_name:-}" ]; then
+        export package_name
+    else
+        die "undefined: package_name"
+    fi
+
+    if [ -n "${fake_version:-}" ]; then
+        export fake_version
+    else
+        die "undefined: fake_version"
+    fi
+
+    if [ -n "${orig_tarball:-}" ]; then
+        export orig_tarball
+    else
+        die "undefined: orig_tarball"
+    fi
+
+    readonly expect_script="$(mktemp -t expect_script.XXXXXX)"
+    envsubst >"${expect_script}" <<'EOF'
+set timeout 60
+
+spawn \
+  bloom-release \
+    --debug \
+    --new-track \
+    --no-web \
+    --override-release-repository-url ${release_bare} \
+    --rosdistro ${ros_distro} \
+    --track ${ros_distro} \
+    ${package_name}
+
+match_max 500
+
+while 1 {
+  expect {
+    timeout {
+      send_user "\nERROR: TIMEOUT\n"
+      exit 1
+    }
+
+    -ex "Release repository url \[press enter to abort\]: " {
+      sleep 1
+      send -- "file://${release_bare}\r"
+    }
+
+    -ex "\[1mCreate a new track called '${ros_distro}' now \[33m\[Y/n\]? \[0m\[0m" {
+      sleep 1
+      send -- "Y\r"
+    }
+
+    -ex "\[4mRepository Name:\[0m\[0m\r" {
+      sleep 1
+      send -- "${package_name}\r"
+    }
+
+    -ex "\[4mUpstream Repository URI:\[0m\[0m\r" {
+      sleep 1
+      send -- "file://${orig_tarball}\r"
+    }
+
+    -ex "\[4mUpstream VCS Type:\[0m\[0m\r" {
+      sleep 1
+      send -- "tar\r"
+    }
+
+    -ex "\[4mVersion:\[0m\[0m\r" {
+      sleep 1
+      send -- "${fake_version}\r"
+    }
+
+    -ex "\[4mRelease Tag:\[0m\[0m\r" {
+      sleep 1
+      send -- ":{none}\r"
+    }
+
+    -ex "\[4mUpstream Devel Branch:\[0m\[0m\r" {
+      sleep 1
+      send -- "\r"
+    }
+
+    -ex "\[4mROS Distro:\[0m\[0m\r" {
+      sleep 1
+      send -- "${ros_distro}\r"
+    }
+
+    -ex "\[4mPatches Directory:\[0m\[0m\r" {
+      sleep 1
+      send -- ":{none}\r"
+    }
+
+    -ex "\[4mRelease Repository Push URL:\[0m\[0m\r" {
+      sleep 1
+      send -- ":{none}\r"
+      break
+    }
+  }
+}
+
+# Blooming sometimes takes an obscene amount of time.
+#
+# * kinetic orocos_kdl: 2 minutes
+# * kinetic ros_comm: 9 minutes
+# * kinetic sns_ik: 4 minutes
+# * melodic intera: 45+ minutes (failed)
+#
+# allow one hour -- nroza 2018.08.16
+set timeout 3600
+
+expect {
+  timeout {
+    send_user "\n#### ERROR: TIMEOUT AFTER ONE HOUR ####\n"
+    exit 1
+  }
+
+  -ex "\u001b\[32m<== \u001b\[0m\u001b\[0mReleased '${package_name}' using release track '${ros_distro}' successfully\u001b\[0m\r" {
+    send_user "\n#### SUCCESS: RELEASED ${package_name} FOR ${ros_distro} ####\n"
+  }
+}
+
+set timeout 300
+
+while 1 {
+  expect {
+    timeout {
+      send_user "\n#### ERROR: TIMEOUT AFTER FIVE MINUTES ####\n"
+      exit 1
+    }
+
+    -ex "Continue \[33m\[Y/n\]? \[0m\[0m" {
+      sleep 1
+      send -- "Y\r"
+    }
+
+    -ex "Would you like to add documentation information for this repository? \[33m\[Y/n\]? \[0m\[0m" {
+      sleep 1
+      send -- "n\r"
+    }
+
+    -ex "Would you like to add source information for this repository? \[33m\[Y/n\]? \[0m\[0m" {
+      sleep 1
+      send -- "n\r"
+    }
+
+    -ex "Would you like to add a maintenance status for this repository? \[33m\[Y/n\]? \[0m\[0m" {
+      sleep 1
+      send -- "n\r"
+    }
+
+    -ex "Would you like to create an OAuth token now \[33m\[Y/n\]? \[0m\[0m" {
+      sleep 1
+      send -- "n\r"
+    }
+
+    eof {
+      send_user "\n#### SUCCESS: BLOOM DONE ####\n"
+      exit 0
+    }
+  }
+}
+EOF
+    expect <"${expect_script}"
+}
+
+run_dockerized() {
+    readonly image_name="${BLOOMER_IMAGE_NAME:-registry.gitlab.com/realtime-neil/bloomer}"
+    if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ] \
+        || ! docker image inspect "${image_name}" >/dev/null 2>&1; then
+        docker image pull "${image_name}" >&2
+    else
+        warning "skipping: docker image pull ${image_name}"
+    fi
+    docker image inspect "${image_name}" >&2
+
+    readonly workdir="$(mktemp -ut workdir.XXXXXX)"
+    docker container run \
+        --env DOCKER_HOST_GID="$(id -g)" \
+        --env DOCKER_HOST_UID="$(id -u)" \
+        --env FAKE_VERSION="${fake_version}" \
+        --env GIT_CONFIG_USER_EMAIL="$(git config user.email)" \
+        --env GIT_CONFIG_USER_NAME="$(git config user.name)" \
+        --env HERE="${here}" \
+        --env ORIG_TARBALL="${orig_tarball}" \
+        --env PACKAGE_NAME="${package_name}" \
+        --env RELEASE_BARE="${release_bare}" \
+        --env ROS_DISTRO="${ros_distro}" \
+        --env THIS="${this}" \
+        --interactive \
+        --mount type=bind,source="${here}",target="${here}",readonly \
+        --mount type=bind,source="${orig_tarball}",target="${orig_tarball}",readonly \
+        --mount type=bind,source="${release_bare}",target="${release_bare}" \
+        --mount type=bind,source=/usr/local/share/ca-certificates,target=/usr/local/share/ca-certificates,readonly \
+        --rm \
+        --workdir="${workdir}" \
+        "${image_name}" sh <<'EOF'
+set -euvx
+
+update-ca-certificates
+
+groupadd --gid ${DOCKER_HOST_GID} luser
+useradd \
+    --uid ${DOCKER_HOST_UID} \
+    --gid ${DOCKER_HOST_GID} \
+    --shell $(command -v sh) \
+    --home-dir $(mktemp -ut luser_home.XXXXXX) \
+    --create-home \
+    luser
+
+su luser - <<EOSU
+${THIS} -r -C ${RELEASE_BARE} -R ${ROS_DISTRO} -P ${PACKAGE_NAME} -V ${FAKE_VERSION} ${ORIG_TARBALL}
+EOSU
+
+EOF
+}
+
+# vet given (possibly relative) path orig_tarball; for good vetting, print
+# resulting full path and return success; otherwise, print nothing and return
+# failure
+vet_orig_tarball() {
+    local result=""
+    if ! result="$(readlink -f "$1")"; then
+        error "bad path: $1"
+        return 1
+    fi
+    if ! [ -f "${result}" ]; then
+        error "bad file: ${result}"
+        return 1
+    fi
+    local regex='^[a-z0-9][a-z0-9.+-]+_[0-9]+([.][0-9]+){2}-[0-9]+-g[0-9a-f]{7,40}[.]orig[.]tar([.](gz|bz2|xz))?$'
+    if ! basename "${result}" | grep -Eq "${regex}"; then
+        error "bad file name: ${result}"
+        return 1
+    fi
+    if ! file -bz "${result}" | grep -q '^POSIX tar archive'; then
+        error "bad file type: $(file -z "${result}")"
+        return 1
+    fi
+    echo "${result}"
+    return 0
+}
+
+# normalize given (assumed full path) orig_tarball to a "*.orig.tar.gz"; for
+# good normalization, print resulting full path and return success; otherwise,
+# print nothing and return faiure.
+norm_orig_tarball() {
+    local result="${1%.orig.tar*}.orig.tar.gz"
+    if [ -f "${result}" ]; then
+        warning "file exists: ${result}"
+        # TODO(neil): do better with extant orig_tarball
+        warning "attempting to overwrite: ${result}"
+    fi
+    case "$1" in
+        *.tar)
+            cat <"$1" | gzip --no-name -c  >"${result}"
+            ;;
+        *.tar.bz2)
+            bzip2 -cd <"$1" | gzip --no-name -c >"${result}"
+            ;;
+        *.tar.xz)
+            xz -cd <"$1" | gzip --no-name -c >"${result}"
+            ;;
+        *.tar.gz)
+            true
+            ;;
+        *)
+            error "bad file extension: $1"
+            return 1
+            ;;
+    esac
+    echo "${result}"
+    return 0
+}
+
+is_empty_dir() {
+    [ "$1" = "$(find "$1" -maxdepth 0 -type d -empty 2>/dev/null)" ]
+}
+
+# vet given release_bare path; for good vetting, print resulting full path and
+# return success; otherwise, print nothing and return failure
+vet_release_bare() {
+    local result=""
+    if ! result="$(readlink -f "$1")"; then
+        error "bad path: $1"
+        return 1
+    fi
+    if ! [ -d "${result}" ]; then
+        error "bad directory: ${result}"
+        return 1
+    fi
+    if ! [ "true" = "$(git -C "${result}" rev-parse --is-bare-repository)" ]; then
+        error "not a bare git repository: ${result}"
+        return 1
+    fi
+    echo "${result}"
+    return 0
+}
+
+# from given (assumed full path) orig_tarball, infer release_bare; for good
+# infer, print resulting full path and return success; otherwise, print nothing
+# and return failure
+infer_release_bare() {
+    local inferred_release_bare=""
+    inferred_release_bare="${1%.orig.tar.gz}.git"
+    if [ -d "${inferred_release_bare}" ]; then
+        warning "directory exists: ${inferred_release_bare}"
+    else
+        info "$(mkdir -vp "${inferred_release_bare}" | xargs)"
+    fi
+    # TODO(neil): do better dealing with extant release_bare
+    find "${inferred_release_bare}" -mindepth 1 -delete
+    info "$(git -C "${inferred_release_bare}" init --bare)"
+    local result=""
+    if ! result="$(vet_release_bare "${inferred_release_bare}")"; then
+        error "FAILURE: vet_release_bare ${inferred_release_bare}"
+        return 1
+    fi
+    echo "${result}"
+    return 0
+}
+
+# * it must only consist of alphanumerics and _ separators. Other symbols might
+#   not be supported by some OSes (e.g. unicode characters) or would make it
+#   hard to follow OSes conventions
+#
+# * they must be at least two characters long and must start with an alphabetic
+#   character. This rule is simply to force the name of the package to be more
+#   human understandable.
+#
+# -- http://www.ros.org/reps/rep-0144.html#mandatory-rules
+#
+# ..._*BUT*_ catkin will happily build packages with hyphens, too.
+vet_package_name() {
+    echo "$1" | grep -Eo '^[a-z0-9][a-z0-9.+-]+$'
+}
+
+infer_package_name() {
+    vet_package_name "$(basename "$1" | grep -Eo '^[^_]+')"
+}
+
+# > The version number of the package in the format MAJOR.MINOR.PATCH where
+# > each part is numeric only.
+#
+# -- http://www.ros.org/reps/rep-0140.html#version
+#
+# This is hard-coded constraint in bloom. There is no way around this, so we
+# feed bloom a fake version; i.e., the dotted-digit-triplet it wants. Later,
+# during the Debian packaging, we can futz it to the "real" version; i.e., the
+# git-describe-style string we want.
+vet_fake_version() {
+    echo "$1" | grep -Eo '^[a-z0-9][a-z0-9.+-]+$'
+}
+
+infer_fake_version() {
+    vet_fake_version "$(basename "$1" | grep -Eo '[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+')"
+}
+
+################################################################################
+
+trap cleanup EXIT
+export TMPDIR="${tmpdir}"
+export LC_ALL=C
+
+while getopts ":hrC:P:V:R:" opt; do
+    case "${opt}" in
+        h)
+            usage
+            exit "$?"
+            ;;
+        r) readonly run_raw="true" ;;
+        C)
+            if ! release_bare="$(vet_release_bare "${OPTARG}")"; then
+                die "bad release_bare: ${OPTARG}"
+            fi
+            readonly release_bare="${release_bare}"
+            ;;
+        P)
+            if ! package_name="$(vet_package_name "${OPTARG}")"; then
+                die "bad package_name: ${OPTARG}"
+            fi
+            readonly package_name="${package_name}"
+            ;;
+        V)
+            if ! fake_version="$(vet_fake_version "${OPTARG}")"; then
+                die "bad fake_version: ${OPTARG}"
+            fi
+            readonly fake_version="${fake_version}"
+            ;;
+        R) readonly ros_distro="${OPTARG}" ;;
+        :) die "Missing argument: -${OPTARG}" ;;
+        \?) die "Invalid option: -${OPTARG}" ;;
+    esac
+done
+shift "$((${OPTIND} - 1))"
+
+# orig_tarball
+if ! [ 1 -eq "$#" ]; then
+    die "bad args"
+fi
+if ! orig_tarball="$(vet_orig_tarball "$1")"; then
+    die "FAILURE: vet_orig_tarball $1"
+fi
+if ! orig_tarball="$(norm_orig_tarball "${orig_tarball}")"; then
+    die "FAILURE: norm_orig_tarball ${orig_tarball}"
+fi
+readonly orig_tarball="${orig_tarball}"
+
+# release_bare
+if [ -n "${release_bare:-}" ]; then
+    info "given release_bare: ${release_bare}"
+else
+    if ! release_bare="$(infer_release_bare "${orig_tarball}")"; then
+        die "FAILURE: infer_release_bare ${orig_tarball}"
+    fi
+    readonly release_bare="${release_bare}"
+    warning "inferred release_bare: ${release_bare}"
+fi
+
+# package_name
+if [ -n "${package_name:-}" ]; then
+    info "given package_name: ${package_name}"
+else
+    if ! package_name="$(infer_package_name "${orig_tarball}")"; then
+        die "FAILURE: infer_package_name ${orig_tarball}"
+    fi
+    readonly package_name="${package_name}"
+    warning "inferred package_name: ${package_name}"
+fi
+
+# fake_version
+if [ -n "${fake_version:-}" ]; then
+    info "given fake_version: ${fake_version}"
+else
+    if ! fake_version="$(infer_fake_version "${orig_tarball}")"; then
+        die "FAILURE: infer_fake_version ${orig_tarball}"
+    fi
+    readonly fake_version="${fake_version}"
+    warning "inferred fake_version: ${fake_version}"
+fi
+
+# ros_distro
+if [ -n "${ros_distro:-}" ]; then
+    info "given ros_distro: ${ros_distro}"
+else
+    readonly ros_distro="${default_ros_distro}"
+    warning "defaulting ros_distro: ${ros_distro}"
+fi
+
+if [ "true" = "${run_raw:-false}" ]; then
+    run_raw
+else
+    run_dockerized
+fi
+
+info "========================"
+info "=== SUCCESSFUL BLOOM ==="
+info "========================"
+info "fake_version          : ${fake_version}"
+info "release_bare          : ${release_bare}"
+info "ros_distro            : ${ros_distro}"
+info "orig_tarball          : ${orig_tarball}"
+
+exit "$?"
