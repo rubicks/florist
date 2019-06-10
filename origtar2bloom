@@ -65,31 +65,6 @@ cleanup() {
     return "${status}"
 }
 
-ends_with() { [ "${1}" != "${1%${2}}" ]; }
-
-is_good_release_bare() {
-    test -d "$(readlink -f "$1")"
-}
-
-# * it must only consist of alphanumerics and _ separators. Other symbols might
-#   not be supported by some OSes (e.g. unicode characters) or would make it
-#   hard to follow OSes conventions
-#
-# * they must be at least two characters long and must start with an alphabetic
-#   character. This rule is simply to force the name of the package to be more
-#   human understandable.
-#
-# -- http://www.ros.org/reps/rep-0144.html#mandatory-rules
-#
-# ..._*BUT*_ catkin will happily build packages with hyphens, too.
-is_good_package_name() {
-    basename "$1" | grep -Eq '^[[:alpha:]][[:alnum:]_-]+$'
-}
-
-is_good_fake_version() {
-    basename "$1" | grep -Eq '^[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+$'
-}
-
 run_raw() {
     if ! git config --global user.name; then
         git config --global user.name "$(whoami)"
@@ -384,7 +359,7 @@ norm_orig_tarball() {
     fi
     case "$1" in
         *.tar)
-            cat <"$1" | gzip --no-name -c  >"${result}"
+            cat <"$1" | gzip --no-name -c >"${result}"
             ;;
         *.tar.bz2)
             bzip2 -cd <"$1" | gzip --no-name -c >"${result}"
@@ -402,10 +377,6 @@ norm_orig_tarball() {
     esac
     echo "${result}"
     return 0
-}
-
-is_empty_dir() {
-    [ "$1" = "$(find "$1" -maxdepth 0 -type d -empty 2>/dev/null)" ]
 }
 
 # vet given release_bare path; for good vetting, print resulting full path and
