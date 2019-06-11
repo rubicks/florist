@@ -391,8 +391,16 @@ vet_release_bare() {
         error "bad directory: ${result}"
         return 1
     fi
+    if ! [ "." = "$(git -C "${result}" rev-parse --git-dir)" ]; then
+        error "missing git dir: ${result}"
+        return 1
+    fi
     if ! [ "true" = "$(git -C "${result}" rev-parse --is-bare-repository)" ]; then
         error "not a bare git repository: ${result}"
+        return 1
+    fi
+    if ! [ "false" = "$(git -C "${result}" rev-parse --is-inside-work-tree)" ]; then
+        error "is inside git work tree: ${result}"
         return 1
     fi
     echo "${result}"
