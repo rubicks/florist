@@ -347,9 +347,10 @@ vet_orig_tarball() {
     return 0
 }
 
-# normalize given (assumed full path) orig_tarball to a "*.orig.tar.gz"; for
-# good normalization, print resulting full path and return success; otherwise,
-# print nothing and return faiure.
+# $1 : orig_tarball canonical path '.*[.]orig[.]tar([.](bz2|xz|gz))?'
+#
+# normalize given tarball to '*.orig.tar.gz'; for good normalization, print
+# result and return success; otherwise print nothing and return failure
 norm_orig_tarball() {
     local result="${1%.orig.tar*}.orig.tar.gz"
     if [ -f "${result}" ]; then
@@ -379,8 +380,10 @@ norm_orig_tarball() {
     return 0
 }
 
-# vet given release_bare path; for good vetting, print resulting full path and
-# return success; otherwise, print nothing and return failure
+# $1 : release_bare path to be vetted
+#
+# for good vetting, print result release_bare canonical path and return
+# success; otherwise print nothing and return failure
 vet_release_bare() {
     local result=""
     if ! result="$(readlink -f "$1")"; then
