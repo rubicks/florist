@@ -294,10 +294,10 @@ run_dockerized() {
         --env ROS_DISTRO="${ros_distro}" \
         --env THIS="${this}" \
         --interactive \
-        --mount type=bind,source="${here}",target="${here}",readonly \
-        --mount type=bind,source="${orig_tarball}",target="${orig_tarball}",readonly \
+        --mount type=bind,readonly,source="${here}",target="${here}" \
+        --mount type=bind,readonly,source="${orig_tarball}",target="${orig_tarball}" \
+        --mount type=bind,readonly,source=/usr/local/share/ca-certificates,target=/usr/local/share/ca-certificates \
         --mount type=bind,source="${release_bare}",target="${release_bare}" \
-        --mount type=bind,source=/usr/local/share/ca-certificates,target=/usr/local/share/ca-certificates,readonly \
         --rm \
         --workdir="${workdir}" \
         "${image_name}" sh <<'EOF'
