@@ -138,7 +138,8 @@ build_catkin_pkg() {
         # 
         # https://bugs.launchpad.net/ubuntu/+source/debhelper/+bug/1193077
         # https://www.debian.org/doc/debian-policy/ch-source.html#s-debianrules-options
-        # https://manpages.debian.org/jessie/debhelper/debhelper.7.en.html
+        # https://dyn.manpages.debian.org/stretch/debhelper/debhelper.7.en.html
+        # https://dyn.manpages.debian.org/stretch/dpkg-dev/dpkg-buildpackage.1.en.html
         #
         # Here's a nasty hack that does the trick:
         sed -ri 's|^(\tdh [$][@] [-]v --buildsystem=cmake)$|\1 --parallel|' debian/rules
@@ -160,7 +161,6 @@ build_catkin_pkg() {
     rm -rf "${release_worktree}"
     dpkg-scanpackages --multiversion . >Packages
     dpkg-scansources . >Sources
-
 }
 
 run_raw() {
@@ -431,31 +431,3 @@ else
 fi
 
 exit "$?"
-
-# todo: if passed no args, then enumerate everything, topologically sort, and
-# build everything
-
-exit "$?"
-
-if ! release_branch="$(git -C ${release_bare} symbolic-ref -q --short HEAD)"; then
-    die "failure: git -C ${release_bare} symbolic-ref -q --short HEAD"
-fi
-
-if ! [ -n "${release_branch}" ]; then
-    die "empty release_branch"
-fi
-
-if ! echo "${release_branch}" | grep -E '^debian(/[[:alnum:]_-]+){3}$'; then
-    die "bad release_branch: ${release_branch}"
-fi
-
-readonly ros_distro="$(echo "${release_branch}" | cut -d/ -f2)"
-readonly distribution="$(echo "${release_branch}" | cut -d/ -f3)"
-readonly package_name="$(echo "${release_branch}" | cut -d/ -f4)"
-
-if [ -n "${new_version:-}" ]; then
-    info "new_version: ${new_version}"
-else
-    readonly new_version="$(dpkg-parsechangelog -l ${release_worktree}/debian/changelog --show-field Version)}"
-    warning "defaulting new_version: ${new_version}"
-fi
