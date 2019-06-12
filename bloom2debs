@@ -20,11 +20,11 @@ Usage: $0 [OPTION]... [CATKIN_PKG]...
 Build debian package artifacts from a local "release".
 
 Options
-    -h                     print this usage and return success
+    -h                 print this usage and return success
     -C RELEASE_BARE    run as if started in RELEASE_BARE (default: \$PWD)
-    -D DISTRIBUTION        override distribution (default: inferred from RELEASE_BARE)
-    -R ROS_DISTRO          override ros_distro (default: inferred from RELEASE_BARE)
-    -V NEW_VERSION         override the bloom-release version (default: inferred from RELEASE_BARE)
+    -D DISTRIBUTION    override distribution (default: inferred from RELEASE_BARE)
+    -R ROS_DISTRO      override ros_distro (default: inferred from RELEASE_BARE)
+    -V NEW_VERSION     override the bloom-release version (default: inferred from RELEASE_BARE)
 
 Notes:
 
@@ -43,7 +43,7 @@ Notes:
 
 Examples:
 
-    \$ $0 -C rapidplan_1.1.0-234-gf5f5e18.dir
+    \$ $0 -C rapidplan_1.1.0-237-ge3abac7.git
 
 EOF
 }
