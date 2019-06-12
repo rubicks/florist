@@ -75,7 +75,6 @@ debian_branch_list() {
     cat <"${result}"
 }
 
-
 # $1 : release_bare
 #
 # from the given release_bare, clone out the 'upstream' branch and enumerate
@@ -93,7 +92,6 @@ get_catkin_pkg_list() {
     sed -ri 's|^- ([[:alnum:]_-]+).*$|\1|g' "${result}"
     cat <"${result}"
 }
-
 
 # $1 : release_bare
 # $2 : catkin_pkg
@@ -113,10 +111,10 @@ build_catkin_pkg() {
         git clone -b "${release_branch}" "file://$1" .
 
         sudo mk-build-deps \
-             --install \
-             --remove \
-             --tool "apt-get -y --no-install-recommends -o Debug::pkgProblemResolver=true" \
-             debian/control
+            --install \
+            --remove \
+            --tool "apt-get -y --no-install-recommends -o Debug::pkgProblemResolver=true" \
+            debian/control
 
         gbp dch \
             --verbose \
@@ -135,7 +133,7 @@ build_catkin_pkg() {
         #export MAKEFLAGS="--jobs=$((1 + $(nproc) >> 1)) --max-load=$(nproc)"
         #
         # Here are some things people are saying about this:
-        # 
+        #
         # https://bugs.launchpad.net/ubuntu/+source/debhelper/+bug/1193077
         # https://www.debian.org/doc/debian-policy/ch-source.html#s-debianrules-options
         # https://dyn.manpages.debian.org/stretch/debhelper/debhelper.7.en.html
@@ -153,7 +151,7 @@ build_catkin_pkg() {
             --git-upstream-branch="${release_branch}" \
             --git-upstream-tree="${release_branch}" \
             -j"$((1 + $(nproc) >> 1))" -us -uc --source-option='-i.*'
-    )    
+    )
     # Now, we're back in the current working directory, where the generated
     # Debian artifacts landed. Delete the git worktree and refresh the index
     # files so that subsequent calls can find the Debian artifacts just built
