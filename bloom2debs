@@ -172,7 +172,23 @@ run_raw() {
         get_catkin_pkg_list "${release_bare}" >"${catkin_pkg_list}"
     fi
 
+    local dpkg_name=""
+    local extant_package=""
+    local extant_source=""
     while read catkin_pkg; do
+        debian_pkg="$(echo "ros-${ros_distro}-${catkin_pkg}" | tr '_' '-')"
+        sed -nr 's/^(Package|Version): (.*)$/\2/gp' Packages | xargs -L2 >packages.list
+        sed -nr 's/^(Package|Version): (.*)$/\2/gp' Sources | xargs -L2 >sources.list
+        if extant_package="$(grep "^${debian_pkg} ${new_version}" packages.list)"; then
+            info "extant package: ${extant_package}"
+        fi
+        if extant_source="$(grep "^${debian_pkg} ${new_version}" sources.list)"; then
+            info "extant source: ${extant_source}"
+        fi
+        if [ -n "${extant_package:-}" ] && [ -n "${extant_source:-}" ]; then
+            warning "skipping: ${debian_pkg} ${new_version}"
+            continue
+        fi
         build_catkin_pkg "${release_bare}" "${catkin_pkg}"
     done <"${catkin_pkg_list}"
 }
@@ -195,7 +211,9 @@ run_dockerized() {
     docker image inspect "${image_name}" >&2
 
     readonly workdir="$(mktemp -ut workdir.XXXXXX)"
+    readonly host_memory_k="$(grep -Eom1 '[0-9]+' /proc/meminfo)"
     docker container run \
+        --cpus "$((1 + $(nproc) >> 1))" \
         --env CONFIGURE_APT_OPTS="${CONFIGURE_APT_OPTS:-}" \
         --env DEBCONF_NONINTERACTIVE_SEEN=true \
         --env DEBIAN_FRONTEND=noninteractive \
@@ -209,6 +227,8 @@ run_dockerized() {
         --env ROS_DISTRO="${ros_distro}" \
         --env THIS="${this}" \
         --interactive \
+        --memory "$((${host_memory_k} >> 2))k" \
+        --memory-swap "$((${host_memory_k} >> 1))k" \
         --mount type=bind,readonly,source="${here}",target="${here}" \
         --mount type=bind,readonly,source="${release_bare}",target="${release_bare}" \
         --mount type=bind,source="${PWD}",target="${workdir}" \
