@@ -21,6 +21,8 @@ Build debian package artifacts from a local "release".
 
 Options
     -h                 print this usage and return success
+    -l                 list catkin packages in build order
+    -U                 unsafe, sacrifice isolation to go faster
     -C RELEASE_BARE    run as if started in RELEASE_BARE (default: \$PWD)
     -D DISTRIBUTION    override distribution (default: inferred from RELEASE_BARE)
     -R ROS_DISTRO      override ros_distro (default: inferred from RELEASE_BARE)
@@ -76,24 +78,6 @@ debian_branch_list() {
 }
 
 # $1 : release_bare
-#
-# from the given release_bare, clone out the 'upstream' branch and enumerate
-# all catkin packages in _topologically-sorted_ (least dependent to most
-# dependent) order.
-get_catkin_pkg_list() {
-    local result="$(mktemp -t catkin_pkg_list.XXXXXX)"
-    local release_worktree="$(mktemp -dt "$(basename "$1" .git).dir.XXXXXX")"
-    git clone -b upstream "file://$1" "${release_worktree}"
-    catkin build --dry-run --workspace "${release_worktree}" >"${result}"
-    sed -ri \
-        -e '1,/^Packages to be built:$/d' \
-        -e '/^Total packages: [[:digit:]]+$/,$d' \
-        "${result}"
-    sed -ri 's|^- ([[:alnum:]_-]+).*$|\1|g' "${result}"
-    cat <"${result}"
-}
-
-# $1 : release_bare
 # $2 : catkin_pkg
 build_catkin_pkg() {
     local issue_net="$(tr -dc '[:alnum:]' </etc/issue.net | tr '[:upper:]' '[:lower:]')"
@@ -108,6 +92,8 @@ build_catkin_pkg() {
         # current call.
         cd "${release_worktree}"
 
+        # create a fresh clone for every single package build because bloom
+        # hates git-lfs or something
         git clone -b "${release_branch}" "file://$1" .
 
         sudo mk-build-deps \
@@ -150,47 +136,94 @@ build_catkin_pkg() {
             --git-ignore-new \
             --git-upstream-branch="${release_branch}" \
             --git-upstream-tree="${release_branch}" \
-            -j"$((1 + $(nproc) >> 1))" -us -uc --source-option='-i.*'
+            -j"$((7 + $(nproc) >> 3))" -us -uc --source-option='-i.*'
     )
     # Now, we're back in the current working directory, where the generated
     # Debian artifacts landed. Delete the git worktree and refresh the index
     # files so that subsequent calls can find the Debian artifacts just built
     # by the current call.
     rm -rf "${release_worktree}"
-    dpkg-scanpackages --multiversion . >Packages
-    dpkg-scansources . >Sources
+}
+
+
+# $1 : name
+# $2 : version
+# $3 : kind
+find_kind() {
+    local apcama="$(mktemp -t "apt-cache-madison_$1.XXXXXX")"
+    apt-cache madison "$1" >"${apcama}"
+    sed -ri 's,^[[:space:]]+,,g;s,[[:space:]]+$,,g;s,[[:space:]]+, ,g' "${apcama}"
+    sed -nri "/^$1 [|] $2 [|] .* $3$/p" "${apcama}"
+    sort -uo "${apcama}" "${apcama}"
+    local result="$(tail -n 1 <"${apcama}")"
+    if ! [ -n "${result}" ]; then
+        return 1
+    fi
+    echo "${result}"
+    return 0
+}
+find_pkg() { find_kind "$1" "$2" 'Packages'; }
+find_src() { find_kind "$1" "$2" 'Sources'; }
+
+# from release_bare, clone out the 'upstream' branch and enumerate all catkin
+# packages in _topologically-sorted_ (least dependent to most dependent) order.
+get_catkin_pkg_list() {
+    # https://stackoverflow.com/questions/23513045/how-to-check-if-a-process-is-running-inside-docker-container/25518538#25518538
+    if ! [ -f "/.dockerenv" ]; then
+        local image_name="registry.gitlab.com/realtime-robotics/ros-dpkg:${ros_distro}"
+        docker container run \
+               --env DEBCONF_NONINTERACTIVE_SEEN=true \
+               --env DEBIAN_FRONTEND=noninteractive \
+               --env RELEASE_BARE="${release_bare}" \
+               --env ROS_DISTRO="${ros_distro}" \
+               --env THIS="${this}" \
+               --interactive \
+               --mount type=bind,readonly,source="${release_bare}",target="${release_bare}" \
+               --mount type=bind,readonly,source="${this}",target="${this}" \
+               --rm \
+               --workdir="$(mktemp -ut workdir.XXXXXX)" \
+               "${image_name}" sh <<'EOF'
+set -euvx
+${THIS} -l -C ${RELEASE_BARE} -R ${ROS_DISTRO}
+EOF
+        return "$?"
+    fi
+    local result="$(mktemp -t catkin_pkg_list.XXXXXX)"
+    local release_worktree="$(mktemp -dt "$(basename "${release_bare}" .git).dir.XXXXXX")"
+    git clone -b upstream "file://${release_bare}" "${release_worktree}"
+    catkin build --dry-run --workspace "${release_worktree}" >"${result}"
+    sed -ri \
+        -e '1,/^Packages to be built:$/d' \
+        -e '/^Total packages: [[:digit:]]+$/,$d' \
+        "${result}"
+    sed -ri 's|^- ([[:alnum:]_-]+).*$|\1|g' "${result}"
+    cat <"${result}"
 }
 
 run_raw() {
     env | sort
-    local catkin_pkg_list="$(mktemp -t catkin_pkg_list.XXXXXX)"
-    if [ 0 -lt "$#" ]; then
-        for catkin_pkg in $@; do
-            echo "${catkin_pkg}" >>"${catkin_pkg_list}"
-        done
-    else
-        get_catkin_pkg_list "${release_bare}" >"${catkin_pkg_list}"
-    fi
-
+    local issue_net="$(tr -dc '[:alnum:]' </etc/issue.net | tr '[:upper:]' '[:lower:]')"
     local dpkg_name=""
-    local extant_package=""
-    local extant_source=""
-    while read catkin_pkg; do
-        debian_pkg="$(echo "ros-${ros_distro}-${catkin_pkg}" | tr '_' '-')"
-        sed -nr 's/^(Package|Version): (.*)$/\2/gp' Packages | xargs -L2 >packages.list
-        sed -nr 's/^(Package|Version): (.*)$/\2/gp' Sources | xargs -L2 >sources.list
-        if extant_package="$(grep "^${debian_pkg} ${new_version}" packages.list)"; then
-            info "extant package: ${extant_package}"
+    local found_pkg=""
+    local found_src=""
+    dpkg-scanpackages --multiversion . >"${PWD}/Packages"
+    dpkg-scansources . >"${PWD}/Sources"
+    for catkin_pkg in $@; do
+        dpkg_name="$(echo "ros-${ros_distro}-${catkin_pkg}" | tr '_' '-')"
+        if found_pkg="$(find_pkg "${dpkg_name}" "${new_version}-${issue_net}")"; then
+            info "found_pkg: ${found_pkg}"
         fi
-        if extant_source="$(grep "^${debian_pkg} ${new_version}" sources.list)"; then
-            info "extant source: ${extant_source}"
+        if found_src="$(find_src "${dpkg_name}" "${new_version}-${issue_net}")"; then
+            info "found_src: ${found_src}"
         fi
-        if [ -n "${extant_package:-}" ] && [ -n "${extant_source:-}" ]; then
-            warning "skipping: ${debian_pkg} ${new_version}"
+        if [ -n "${found_pkg:-}" ] && [ -n "${found_src:-}" ]; then
+            warning "skipping: ${catkin_pkg}"
             continue
         fi
         build_catkin_pkg "${release_bare}" "${catkin_pkg}"
-    done <"${catkin_pkg_list}"
+        dpkg-scanpackages --multiversion . >"${PWD}/Packages"
+        dpkg-scansources . >"${PWD}/Sources"
+    done
 }
 
 # http://www.etalabs.net/sh_tricks.html
@@ -200,8 +233,8 @@ save() {
 }
 
 run_dockerized() {
-    readonly rest_args="$(save $@)"
-    readonly image_name="registry.gitlab.com/realtime-robotics/ros-dpkg:${ros_distro}"
+    local rest_args="$(save $@)"
+    local image_name="registry.gitlab.com/realtime-robotics/ros-dpkg:${ros_distro}"
     if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ] \
         || ! docker image inspect "${image_name}" >/dev/null 2>&1; then
         docker image pull "${image_name}" >&2
@@ -210,10 +243,11 @@ run_dockerized() {
     fi
     docker image inspect "${image_name}" >&2
 
-    readonly workdir="$(mktemp -ut workdir.XXXXXX)"
-    readonly host_memory_k="$(grep -Eom1 '[0-9]+' /proc/meminfo)"
+    local workdir="$(mktemp -ut workdir.XXXXXX)"
+    local host_memory_k="$(grep -Eom1 '[0-9]+' /proc/meminfo)"
+    # https://docs.docker.com/config/containers/resource_constraints/
     docker container run \
-        --cpus "$((1 + $(nproc) >> 1))" \
+        --cpus "$((7 + $(nproc) >> 3))" \
         --env CONFIGURE_APT_OPTS="${CONFIGURE_APT_OPTS:-}" \
         --env DEBCONF_NONINTERACTIVE_SEEN=true \
         --env DEBIAN_FRONTEND=noninteractive \
@@ -227,8 +261,9 @@ run_dockerized() {
         --env ROS_DISTRO="${ros_distro}" \
         --env THIS="${this}" \
         --interactive \
-        --memory "$((${host_memory_k} >> 2))k" \
-        --memory-swap "$((${host_memory_k} >> 1))k" \
+        --memory "$((${host_memory_k} >> 1))k" \
+        --memory-swap "${host_memory_k}k" \
+        --memory-swappiness 100 \
         --mount type=bind,readonly,source="${here}",target="${here}" \
         --mount type=bind,readonly,source="${release_bare}",target="${release_bare}" \
         --mount type=bind,source="${PWD}",target="${workdir}" \
@@ -269,8 +304,8 @@ useradd \
 
 nice -n19 su luser <<'SU_LUSER'
 set -euvx
-dpkg-scanpackages --multiversion . >Packages
-dpkg-scansources . >Sources
+dpkg-scanpackages --multiversion . >${PWD}/Packages
+dpkg-scansources . >${PWD}/Sources
 SU_LUSER
 
 # use apt config option "Acquire::GzipIndexes=false" to work around the
@@ -295,10 +330,19 @@ LUSER_MK_BUILD_DEPS
 nice -n19 su luser <<'SU_LUSER'
 set -euvx
 eval "set -- ${REST_ARGS}"
-${THIS} -r -C ${RELEASE_BARE} -D ${DISTRIBUTION} -R ${ROS_DISTRO} -V ${NEW_VERSION} $@
+${THIS} -U -C ${RELEASE_BARE} -D ${DISTRIBUTION} -R ${ROS_DISTRO} -V ${NEW_VERSION} $@
 SU_LUSER
 
 EOF
+}
+
+run() {
+    # https://stackoverflow.com/questions/23513045/how-to-check-if-a-process-is-running-inside-docker-container/25518538#25518538
+    if ! [ -f "/.dockerenv" ]; then
+        run_dockerized $@
+    else
+        run_raw $@
+    fi
 }
 
 # $1 : release_bare path to be vetted
@@ -376,13 +420,14 @@ trap cleanup EXIT
 export TMPDIR="${tmpdir}"
 export LC_ALL=C
 
-while getopts ":hrC:D:R:V:" opt; do
+while getopts ":hlUC:D:R:V:" opt; do
     case "${opt}" in
         h)
             usage
             exit "$?"
             ;;
-        r) readonly run_raw="true" ;;
+        l) readonly requested_list="true" ;;
+        U) readonly requested_unsafe="true" ;;
         C)
             if ! release_bare="$(vet_release_bare "${OPTARG}")"; then
                 die "bad release_bare: ${OPTARG}"
@@ -442,10 +487,25 @@ else
     warning "inferred new_version: ${new_version}"
 fi
 
-if [ "true" = "${run_raw:-false}" ]; then
-    run_raw $@
-else
-    run_dockerized $@
+if [ "true" = "${requested_list:-false}" ]; then
+    get_catkin_pkg_list
+    exit "$?"
 fi
+
+if [ 0 -eq "$#" ]; then
+    warning "no catkin_pkg arguments given"
+    warning "will enumerate and build everything"
+    eval "set -- $(get_catkin_pkg_list | xargs)"
+fi
+
+if [ "true" = "${requested_unsafe:-false}" ]; then
+    warning "requested unsafe operation"
+    run $@
+    exit "$?"
+fi
+
+for catkin_pkg in $@; do
+    run "${catkin_pkg}"
+done
 
 exit "$?"
