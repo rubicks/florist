@@ -303,9 +303,13 @@ SU_LUSER
 EOF
 }
 
+# https://stackoverflow.com/questions/23513045/how-to-check-if-a-process-is-running-inside-docker-container
+is_in_container() {
+    grep -Eq '/docker/[[:xdigit:]]{64}$' /proc/1/cgroup
+}
+
 run() {
-    # https://stackoverflow.com/questions/23513045/how-to-check-if-a-process-is-running-inside-docker-container/25518538#25518538
-    if ! [ -f "/.dockerenv" ]; then
+    if ! is_in_container; then
         run_dockerized $@
     else
         run_raw $@
@@ -384,8 +388,7 @@ infer_new_version() {
 # from release_bare, clone out the 'upstream' branch and enumerate all catkin
 # packages in _topologically-sorted_ (least dependent to most dependent) order.
 get_catkin_pkg_list() {
-    # https://stackoverflow.com/questions/23513045/how-to-check-if-a-process-is-running-inside-docker-container/25518538#25518538
-    if ! [ -f "/.dockerenv" ]; then
+    if ! is_in_container; then
         local image_name="registry.gitlab.com/realtime-robotics/ros-dpkg:${ros_distro}"
         docker container run \
             --env DEBCONF_NONINTERACTIVE_SEEN=true \
