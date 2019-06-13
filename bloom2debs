@@ -393,6 +393,8 @@ get_catkin_pkg_list() {
         docker container run \
             --env DEBCONF_NONINTERACTIVE_SEEN=true \
             --env DEBIAN_FRONTEND=noninteractive \
+            --env DISTRIBUTION="${distribution}" \
+            --env NEW_VERSION="${new_version}" \
             --env RELEASE_BARE="${release_bare}" \
             --env ROS_DISTRO="${ros_distro}" \
             --env THIS="${this}" \
@@ -403,7 +405,7 @@ get_catkin_pkg_list() {
             --workdir="$(mktemp -ut workdir.XXXXXX)" \
             "${image_name}" sh <<'EOF'
 set -euvx
-${THIS} -l -C ${RELEASE_BARE} -R ${ROS_DISTRO}
+${THIS} -l -C ${RELEASE_BARE} -D ${DISTRIBUTION} -R ${ROS_DISTRO} -V ${NEW_VERSION}
 EOF
         return "$?"
     fi
