@@ -47,6 +47,8 @@ Examples:
 
     \$ $0 -C rapidplan_1.1.0-237-ge3abac7.git
 
+    \$ $0 -U -C rapidplan_1.1.0-237-ge3abac7.git
+
 EOF
 }
 
@@ -145,7 +147,6 @@ build_catkin_pkg() {
     rm -rf "${release_worktree}"
 }
 
-
 # $1 : name
 # $2 : version
 # $3 : kind
@@ -164,41 +165,6 @@ find_kind() {
 }
 find_pkg() { find_kind "$1" "$2" 'Packages'; }
 find_src() { find_kind "$1" "$2" 'Sources'; }
-
-# from release_bare, clone out the 'upstream' branch and enumerate all catkin
-# packages in _topologically-sorted_ (least dependent to most dependent) order.
-get_catkin_pkg_list() {
-    # https://stackoverflow.com/questions/23513045/how-to-check-if-a-process-is-running-inside-docker-container/25518538#25518538
-    if ! [ -f "/.dockerenv" ]; then
-        local image_name="registry.gitlab.com/realtime-robotics/ros-dpkg:${ros_distro}"
-        docker container run \
-               --env DEBCONF_NONINTERACTIVE_SEEN=true \
-               --env DEBIAN_FRONTEND=noninteractive \
-               --env RELEASE_BARE="${release_bare}" \
-               --env ROS_DISTRO="${ros_distro}" \
-               --env THIS="${this}" \
-               --interactive \
-               --mount type=bind,readonly,source="${release_bare}",target="${release_bare}" \
-               --mount type=bind,readonly,source="${this}",target="${this}" \
-               --rm \
-               --workdir="$(mktemp -ut workdir.XXXXXX)" \
-               "${image_name}" sh <<'EOF'
-set -euvx
-${THIS} -l -C ${RELEASE_BARE} -R ${ROS_DISTRO}
-EOF
-        return "$?"
-    fi
-    local result="$(mktemp -t catkin_pkg_list.XXXXXX)"
-    local release_worktree="$(mktemp -dt "$(basename "${release_bare}" .git).dir.XXXXXX")"
-    git clone -b upstream "file://${release_bare}" "${release_worktree}"
-    catkin build --dry-run --workspace "${release_worktree}" >"${result}"
-    sed -ri \
-        -e '1,/^Packages to be built:$/d' \
-        -e '/^Total packages: [[:digit:]]+$/,$d' \
-        "${result}"
-    sed -ri 's|^- ([[:alnum:]_-]+).*$|\1|g' "${result}"
-    cat <"${result}"
-}
 
 run_raw() {
     env | sort
@@ -227,13 +193,13 @@ run_raw() {
 }
 
 # http://www.etalabs.net/sh_tricks.html
-save() {
+save_args() {
     for i; do printf %s\\n "$i" | sed "s/'/'\\\\''/g;1s/^/'/;\$s/\$/' \\\\/"; done
     echo " "
 }
 
 run_dockerized() {
-    local rest_args="$(save $@)"
+    local saved_args="$(save_args $@)"
     local image_name="registry.gitlab.com/realtime-robotics/ros-dpkg:${ros_distro}"
     if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ] \
         || ! docker image inspect "${image_name}" >/dev/null 2>&1; then
@@ -257,8 +223,8 @@ run_dockerized() {
         --env HERE="${here}" \
         --env NEW_VERSION="${new_version}" \
         --env RELEASE_BARE="${release_bare}" \
-        --env REST_ARGS="${rest_args}" \
         --env ROS_DISTRO="${ros_distro}" \
+        --env SAVED_ARGS="${saved_args}" \
         --env THIS="${this}" \
         --interactive \
         --memory "$((${host_memory_k} >> 1))k" \
@@ -329,7 +295,8 @@ LUSER_MK_BUILD_DEPS
 
 nice -n19 su luser <<'SU_LUSER'
 set -euvx
-eval "set -- ${REST_ARGS}"
+eval "set -- ${SAVED_ARGS}"
+unset SAVED_ARGS
 ${THIS} -U -C ${RELEASE_BARE} -D ${DISTRIBUTION} -R ${ROS_DISTRO} -V ${NEW_VERSION} $@
 SU_LUSER
 
@@ -412,6 +379,41 @@ infer_ros_distro() {
 infer_new_version() {
     basename "$1" \
         | grep -Eo '[[:digit:]]+([.][[:digit:]]+){2}-[[:digit:]]+-g[[:xdigit:]]{7,40}'
+}
+
+# from release_bare, clone out the 'upstream' branch and enumerate all catkin
+# packages in _topologically-sorted_ (least dependent to most dependent) order.
+get_catkin_pkg_list() {
+    # https://stackoverflow.com/questions/23513045/how-to-check-if-a-process-is-running-inside-docker-container/25518538#25518538
+    if ! [ -f "/.dockerenv" ]; then
+        local image_name="registry.gitlab.com/realtime-robotics/ros-dpkg:${ros_distro}"
+        docker container run \
+            --env DEBCONF_NONINTERACTIVE_SEEN=true \
+            --env DEBIAN_FRONTEND=noninteractive \
+            --env RELEASE_BARE="${release_bare}" \
+            --env ROS_DISTRO="${ros_distro}" \
+            --env THIS="${this}" \
+            --interactive \
+            --mount type=bind,readonly,source="${release_bare}",target="${release_bare}" \
+            --mount type=bind,readonly,source="${this}",target="${this}" \
+            --rm \
+            --workdir="$(mktemp -ut workdir.XXXXXX)" \
+            "${image_name}" sh <<'EOF'
+set -euvx
+${THIS} -l -C ${RELEASE_BARE} -R ${ROS_DISTRO}
+EOF
+        return "$?"
+    fi
+    local result="$(mktemp -t catkin_pkg_list.XXXXXX)"
+    local release_worktree="$(mktemp -dt "$(basename "${release_bare}" .git).dir.XXXXXX")"
+    git clone -b upstream "file://${release_bare}" "${release_worktree}"
+    catkin build --dry-run --workspace "${release_worktree}" >"${result}"
+    sed -ri \
+        -e '1,/^Packages to be built:$/d' \
+        -e '/^Total packages: [[:digit:]]+$/,$d' \
+        "${result}"
+    sed -ri 's|^- ([[:alnum:]_-]+).*$|\1|g' "${result}"
+    cat <"${result}"
 }
 
 ################################################################################
