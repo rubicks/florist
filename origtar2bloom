@@ -24,9 +24,9 @@ Bloom the given ORIG_TARBALL into a local bare git release repository.
 Options
     -h                 print this usage and return success
     -C RELEASE_BARE    bloom into RELEASE_BARE (default: \${ORIG_TARBALL%.orig.tar*}.git)
+    -R ROS_DISTRO      bloom for ROS_DISTRO (default: ${default_ros_distro})
     -P PACKAGE_NAME    override package name (default: \${ORIG_TARBALL%%_*})
     -V FAKE_VERSION    override fake version (default: \$(echo \${ORIG_TARBALL} | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+'))
-    -R ROS_DISTRO      bloom for ROS_DISTRO (default: ${default_ros_distro})
 
 Examples:
 
@@ -94,35 +94,30 @@ run_raw() {
     # -- neil 2018.07.31
     bloom-release --version
 
-    if [ -n "${release_bare:-}" ]; then
-        export release_bare
-    else
+    if ! [ -n "${release_bare:-}" ]; then
         die "undefined: release_bare"
     fi
+    export release_bare
 
-    if [ -n "${ros_distro:-}" ]; then
-        export ros_distro
-    else
+    if ! [ -n "${ros_distro:-}" ]; then
         die "undefined: ros_distro"
     fi
+    export ros_distro
 
-    if [ -n "${package_name:-}" ]; then
-        export package_name
-    else
+    if ! [ -n "${package_name:-}" ]; then
         die "undefined: package_name"
     fi
+    export package_name
 
-    if [ -n "${fake_version:-}" ]; then
-        export fake_version
-    else
+    if ! [ -n "${fake_version:-}" ]; then
         die "undefined: fake_version"
     fi
+    export fake_version
 
-    if [ -n "${orig_tarball:-}" ]; then
-        export orig_tarball
-    else
+    if ! [ -n "${orig_tarball:-}" ]; then
         die "undefined: orig_tarball"
     fi
+    export orig_tarball
 
     readonly expect_script="$(mktemp -t expect_script.XXXXXX)"
     envsubst >"${expect_script}" <<'EOF'
@@ -271,7 +266,7 @@ EOF
 }
 
 run_dockerized() {
-    readonly image_name="${BLOOMER_IMAGE_NAME:-registry.gitlab.com/realtime-neil/bloomer}"
+    local image_name="${BLOOMER_IMAGE_NAME:-registry.gitlab.com/realtime-neil/bloomer}"
     if [ "true" = "${DOCKER_IMAGE_PULL:-false}" ] \
         || ! docker image inspect "${image_name}" >/dev/null 2>&1; then
         docker image pull "${image_name}" >&2
@@ -280,19 +275,23 @@ run_dockerized() {
     fi
     docker image inspect "${image_name}" >&2
 
-    readonly workdir="$(mktemp -ut workdir.XXXXXX)"
+    local docker_cmd=""
+    read docker_cmd <<EOF
+${this} \
+-C ${release_bare} \
+-R ${ros_distro} \
+-P ${package_name} \
+-V ${fake_version} \
+${orig_tarball}
+EOF
+
+    local workdir="$(mktemp -ut workdir.XXXXXX)"
     docker container run \
+        --env DOCKER_CMD="${docker_cmd}" \
         --env DOCKER_HOST_GID="$(id -g)" \
         --env DOCKER_HOST_UID="$(id -u)" \
-        --env FAKE_VERSION="${fake_version}" \
         --env GIT_CONFIG_USER_EMAIL="$(git config user.email)" \
         --env GIT_CONFIG_USER_NAME="$(git config user.name)" \
-        --env HERE="${here}" \
-        --env ORIG_TARBALL="${orig_tarball}" \
-        --env PACKAGE_NAME="${package_name}" \
-        --env RELEASE_BARE="${release_bare}" \
-        --env ROS_DISTRO="${ros_distro}" \
-        --env THIS="${this}" \
         --interactive \
         --mount type=bind,readonly,source="${here}",target="${here}" \
         --mount type=bind,readonly,source="${orig_tarball}",target="${orig_tarball}" \
@@ -314,8 +313,8 @@ useradd \
     --create-home \
     luser
 
-su luser - <<EOSU
-${THIS} -r -C ${RELEASE_BARE} -R ${ROS_DISTRO} -P ${PACKAGE_NAME} -V ${FAKE_VERSION} ${ORIG_TARBALL}
+nice -n19 su luser - <<'EOSU'
+${DOCKER_CMD}
 EOSU
 
 EOF
@@ -469,19 +468,22 @@ infer_fake_version() {
     vet_fake_version "$(basename "$1" | grep -Eo '[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+')"
 }
 
+# https://stackoverflow.com/questions/23513045/how-to-check-if-a-process-is-running-inside-docker-container
+# https://stackoverflow.com/questions/20010199/how-to-determine-if-a-process-runs-inside-lxc-docker
+is_in_container() { grep -q 'lxc\|docker' /proc/1/cgroup; }
+
 ################################################################################
 
 trap cleanup EXIT
 export TMPDIR="${tmpdir}"
 export LC_ALL=C
 
-while getopts ":hrC:P:V:R:" opt; do
+while getopts ":hC:P:V:R:" opt; do
     case "${opt}" in
         h)
             usage
             exit "$?"
             ;;
-        r) readonly run_raw="true" ;;
         C)
             if ! release_bare="$(vet_release_bare "${OPTARG}")"; then
                 die "bad release_bare: ${OPTARG}"
@@ -530,6 +532,14 @@ else
     warning "inferred release_bare: ${release_bare}"
 fi
 
+# ros_distro
+if [ -n "${ros_distro:-}" ]; then
+    info "given ros_distro: ${ros_distro}"
+else
+    readonly ros_distro="${default_ros_distro}"
+    warning "defaulting ros_distro: ${ros_distro}"
+fi
+
 # package_name
 if [ -n "${package_name:-}" ]; then
     info "given package_name: ${package_name}"
@@ -552,15 +562,7 @@ else
     warning "inferred fake_version: ${fake_version}"
 fi
 
-# ros_distro
-if [ -n "${ros_distro:-}" ]; then
-    info "given ros_distro: ${ros_distro}"
-else
-    readonly ros_distro="${default_ros_distro}"
-    warning "defaulting ros_distro: ${ros_distro}"
-fi
-
-if [ "true" = "${run_raw:-false}" ]; then
+if is_in_container; then
     run_raw
 else
     run_dockerized
