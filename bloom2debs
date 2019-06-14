@@ -502,7 +502,9 @@ fi
 if [ 0 -eq "$#" ]; then
     warning "no catkin_pkg arguments given"
     warning "will enumerate and build everything"
-    eval "set -- $(get_catkin_pkg_list | xargs)"
+    readonly catkin_pkg_list="$(mktemp -t catkin_pkg_list.XXXXXX)"
+    get_catkin_pkg_list >"${catkin_pkg_list}"
+    eval "set -- $(xargs <"${catkin_pkg_list}")"
 fi
 
 if [ "true" = "${requested_unsafe:-false}" ]; then
