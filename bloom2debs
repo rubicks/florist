@@ -293,6 +293,31 @@ cat >/etc/sudoers.d/luser-mk-build-deps <<LUSER_MK_BUILD_DEPS
 luser $(hostname) = (root) NOPASSWD: $(command -v mk-build-deps)
 LUSER_MK_BUILD_DEPS
 
+# It's really hard to extract gcc from linux. The following effectively "works"
+# in the sense that we...
+#
+# * "hold" `gcc*` and `g++*` Debian packages to prevent `mk-build-deps
+# --install` from changing them incidentally (or intentionally)
+#
+# * overwrite executable binaries of the form `/usr/bin/gcc*` and
+# `/usr/bin/g++*` with symlinks to `/usr/bin/cc` and `/usr/bin/c++`,
+# respectively
+#
+# * https://clang.debian.net/ , "Configuration of the chroot" section
+#
+# * https://salsa.debian.org/lucas/collab-qa-tools/blob/master/modes/clang8
+if ! info "Leaving gcc alone. For now."; then
+    dpkg --get-selections \
+        | sed -nr 's/^((gcc|g[+][+]).*)install$/\1hold/gp' \
+        | dpkg --set-selections
+    find /usr/bin -type f -perm /111 -regextype posix-extended \
+         -regex "/usr/bin/gcc(-[[:digit:].]+)?" \
+         -exec ln -vnsrf $(command -v cc) {} \;
+    find /usr/bin -type f -perm /111 -regextype posix-extended \
+         -regex "/usr/bin/g[+][+](-[[:digit:].]+)?" \
+         -exec ln -vnsrf $(command -v c++) {} \;
+fi
+
 nice -n19 su luser <<'SU_LUSER'
 set -euvx
 eval "set -- ${SAVED_ARGS}"
