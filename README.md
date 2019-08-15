@@ -112,96 +112,75 @@ through a week-old roadkill.
 
 # Q. How do I make a release repository?
 
-Use the `tarball2bloom` script in this project.
+Use the `origtar2bloom` script in this project.
 
-    $ ./tarball2bloom -h
-    Usage: ./tarball2bloom [OPTION]... ORIG_TARBALL
+    $ ./origtar2bloom -h
+    Usage: ./origtar2bloom [OPTION]... ORIG_TARBALL
     Bloom the given ORIG_TARBALL into a local bare git release repository.
-
+    
     Options
         -h                 print this usage and return success
-        -C RELEASE_BARE    bloom into RELEASE_BARE (default: ${ORIG_TARBALL%.orig.tar.gz}.git)
+        -C RELEASE_BARE    bloom into RELEASE_BARE (default: ${ORIG_TARBALL%.orig.tar*}.git)
         -R ROS_DISTRO      bloom for ROS_DISTRO (default: kinetic)
         -P PACKAGE_NAME    override package name (default: ${ORIG_TARBALL%%_*})
         -V FAKE_VERSION    override fake version (default: $(echo ${ORIG_TARBALL} | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+'))
-
+    
     Examples:
-
-        $ ./tarball2bloom rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
-
-        $ ./tarball2bloom \
+    
+        $ ./origtar2bloom rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
+    
+        $ ./origtar2bloom \
         >      -C rapidplan-release_0.1.2-118-gd75c1a7.git \
         >      rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
-
-        $ ./tarball2bloom \
+    
+        $ ./origtar2bloom \
         >      -C rapidplan-release_0.1.2-118-gd75c1a7.git \
         >      -R kinetic \
         >      rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
-
-        $ ./tarball2bloom \
+    
+        $ ./origtar2bloom \
         >      -C rapidplan-release_0.1.2-118-gd75c1a7.git \
         >      -R kinetic \
         >      -V 0.1.2 \
         >      rapidplan_0.1.2-118-gd75c1a7.orig.tar.gz
 
-
 # Q. How do I make debian artifacts?
 
-Use the `bloom2deb` script in this project.
+Use the `bloom2debs` script in this project.
 
-    $ ./bloom2deb -h
-    Usage: ./bloom2deb [OPTION]... [-- [buildpackage option]...]
-    Build debian package artifacts from local bloomed RELEASE_DIR.
-
+    $ ./bloom2debs -h
+    Usage: ./bloom2debs [OPTION]... [CATKIN_PKG]...
+    Build debian package artifacts from a local "release".
+    
     Options
-        -h                print this usage and return success
-        -C RELEASE_DIR    run as if started in RELEASE_DIR (default: $PWD)
-        -V NEW_VERSION    override the bloom-release version
-
+        -h                 print this usage and return success
+        -l                 list catkin packages in build order
+        -U                 unsafe, sacrifice isolation to go faster
+        -C RELEASE_BARE    run as if started in RELEASE_BARE (default: $PWD)
+        -D DISTRIBUTION    override distribution (default: inferred from RELEASE_BARE)
+        -R ROS_DISTRO      override ros_distro (default: inferred from RELEASE_BARE)
+        -V NEW_VERSION     override the bloom-release version (default: inferred from RELEASE_BARE)
+    
     Notes:
-
-        RELEASE_DIR must be a valid git checkout directory and the current branch
-        name must be of the form
-
-            "debian/${ROS_DISTRO}/${DISTRIBUTION}/${PACKAGE_NAME}"
-
+    
+        RELEASE_BARE must be a valid git work tree directory and must contain
+        branches of the form
+    
+            "debian/${ROS_DISTRO}/${DISTRIBUTION}/${DEBIAN_PKG}"
+    
         Examples:
-
+    
             * debian/kinetic/xenial/ros_comm
             * debian/kinetic/xenial/sns_ik
             * debian/melodic/bionic/orocos_kdl
-
-    Example:
-
-        $ ./bloom2deb -C ~/rapidplan-release -V 0.1.0-9-g8eb4b80 -- --source-option=-Dvcs-ref=0.1.0
-
-
-# Q. How do I bloom and package everything at once?
-
-Use the `origtar2deb` script in this project; it wraps invocations to
-`tarball2bloom` and `bloom2deb`. A word of warning: you may not want some the
-assumed defaults.
-
-    $ ./origtar2deb -h
-    Usage: ./origtar2deb [OPTION]... ORIGTAR
-    Bloom, build, and package an orig tarball.
-
-    Options
-        -h                 print this usage and return success
-        -f                 force bloom (overwrite extant release repository)
-        -D DISTRIBUTION    override distribution (default: xenial)
-        -R ROS_DISTRO      override ros_distro (default: kinetic)
-
+    
+        Debian artifacts will be produced in /home/neil/code/florist
+    
     Examples:
-
-        $ ./origtar2deb rapidplan_0.1.2-222-g4a6d3cc.orig.tar
-
-        $ ./origtar2deb -f rapidplan_0.1.2-222-g4a6d3cc.orig.tar
-
-        $ ./origtar2deb -f -D xenial rapidplan_0.1.2-222-g4a6d3cc.orig.tar
-
-        $ ./origtar2deb -f -D xenial -R kinetic rapidplan_0.1.2-222-g4a6d3cc.orig.tar
-
+    
+        $ ./bloom2debs -C rapidplan_1.1.0-237-ge3abac7.git
+    
+        $ ./bloom2debs -U -C rapidplan_1.1.0-237-ge3abac7.git
 
 [ros]:http://www.ros.org
 [cmake]:https://cmake.org
