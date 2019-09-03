@@ -130,6 +130,11 @@ build_catkin_pkg() {
         # Here's a nasty hack that does the trick:
         sed -ri 's|^(\tdh [$][@] [-]v --buildsystem=cmake)$|\1 --parallel|' debian/rules
 
+        # There is something up with the Xenial debhelper. It uses gcc and g++
+        # even though cc and c++ are pointing to clang and clang++
+        sed -ri '/^export DH_VERBOSE=1$/aexport CXX=$(shell sh -c "command -v c++")' debian/rules
+        sed -ri '/^export DH_VERBOSE=1$/aexport CC=$(shell sh -c "command -v cc")' debian/rules
+
         # https://github.com/ros-infrastructure/ros_buildfarm/blob/master/ros_buildfarm/sourcedeb_job.py
         gbp buildpackage \
             --git-compression-level=9 \
