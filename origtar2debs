@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# florist/origtar2deb
+# florist/origtar2debs
 
 set -euvx
 
