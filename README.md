@@ -82,6 +82,7 @@ preferrably with `catkin`.
 
 [git-submodule]:https://git-scm.com/book/en/v2/Git-Tools-Submodules
 [git-lfs]:https://git-lfs.github.com/
+[git-annex]:https://git-annex.branchable.com/
 [targz-specifically]:https://github.com/ros-infrastructure/bloom/commit/b3f59bfc03e00806451ad2b054819291a45844f2#diff-43085dccbe9f83cd09c4636a5543faacR288
 
 
