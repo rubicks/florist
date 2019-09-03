@@ -56,12 +56,18 @@ one of four forms:
         Upstream URI is a tarball
       ['git']:
 
-The default, `git`, works really well --- as long as you don't use [`git
-submodule`][git-submodule] and/or [`git lfs`][git-lfs]. Because non-trivial
-software projects often rely on submodules and LFS, this document hereafter
-assumes the Upstream URI references a tarball. By "tarball", what the `bloom`
-maintainers [specifically mean][targz-specifically] is a `gzip`-compressed
-`tar`-archive with a `.tar.gz` file extension.
+The default, `git`, works really well as long as you don't use any of the
+following:
+
+* [`git submodule`][git-submodule]
+* [`git lfs`][git-lfs]
+* [`git annex`][git-annex]
+
+Because non-trivial software projects (read, "the ones I work on") often rely
+on submodules and LFS, this document hereafter assumes the Upstream URI
+references a tarball. By "tarball", what the `bloom` maintainers [specifically
+mean][targz-specifically] is a `gzip`-compressed `tar`-archive with a `.tar.gz`
+file extension.
 
 > This repository can be hosted anywhere (even locally) and can be ... an
 > archive (tar.gz only for now, but there are plans for tar.bz and zip).
