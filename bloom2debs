@@ -127,6 +127,11 @@ build_catkin_pkg() {
         # https://dyn.manpages.debian.org/stretch/debhelper/debhelper.7.en.html
         # https://dyn.manpages.debian.org/stretch/dpkg-dev/dpkg-buildpackage.1.en.html
         #
+        # Here's the issue and pull request I created:
+        #
+        # * https://github.com/ros-infrastructure/bloom/issues/546
+        # * https://github.com/ros-infrastructure/bloom/pull/547
+        #
         # Here's a nasty hack that does the trick:
         sed -ri 's|^(\tdh [$][@] [-]v --buildsystem=cmake)$|\1 --parallel|' debian/rules
 
