@@ -132,8 +132,12 @@ build_catkin_pkg() {
         # * https://github.com/ros-infrastructure/bloom/issues/546
         # * https://github.com/ros-infrastructure/bloom/pull/547
         #
-        # Here's a nasty hack that does the trick:
-        sed -ri 's|^(\tdh [$][@] [-]v --buildsystem=cmake)$|\1 --parallel|' debian/rules
+        # The reasons for the following nasty hack include but are not limited
+        # to the following:
+        #
+        # * get --parallel builds working
+        # * get systemd units enabled and started (requires dh-systemd)
+        sed -ri 's|^(\tdh [$][@] [-]v --buildsystem=cmake)$|\1 --parallel --with systemd|' debian/rules
 
         # There is something up with the Xenial debhelper. It uses gcc and g++
         # even though cc and c++ are pointing to clang and clang++
