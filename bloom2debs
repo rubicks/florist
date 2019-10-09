@@ -137,7 +137,7 @@ build_catkin_pkg() {
         #
         # * get --parallel builds working
         # * get systemd units enabled and started (requires dh-systemd)
-        sed -ri 's|^(\tdh [$][@] [-]v --buildsystem=cmake)$|\1 --parallel --with systemd|' debian/rules
+        sed -ri 's|^(\tdh [$][@] [-]v .*)$|\1 --parallel --with systemd|' debian/rules
 
         # There is something up with the Xenial debhelper. It uses gcc and g++
         # even though cc and c++ are pointing to clang and clang++
@@ -406,9 +406,9 @@ get_single_unique() {
 
 # $1 : release_bare path (assumed canonical)
 #
-# infer distribution from given release_bare; for good inference, print
-# distribution and return success; otherwise, print nothing and return failure
-infer_distribution() {
+# find distribution from given release_bare; if found, then print distribution
+# and return success; else, print nothing and return failure
+find_distribution() {
     local branch_list="$(mktemp -t branch_list.XXXXXX)"
     debian_branch_list "$1" >"${branch_list}"
     local distribution_list="$(mktemp -t distribution_list.XXXXXX)"
@@ -418,9 +418,9 @@ infer_distribution() {
 
 # $1 : release_bare path (assumed canonical)
 #
-# infer ros_distro from given release_bare; for good inference, print
-# ros_distro and return success; otherwise, print nothing and return failure
-infer_ros_distro() {
+# find ros_distro from given release_bare; if found, then print ros_distro and
+# return success; else, print nothing and return failure
+find_ros_distro() {
     local branch_list="$(mktemp -t branch_list.XXXXXX)"
     debian_branch_list "$1" >"${branch_list}"
     local ros_distro_list="$(mktemp -t ros_distro_list.XXXXXX)"
@@ -470,6 +470,52 @@ EOF
     cat <"${result}"
 }
 
+# $1 : ros_distro
+infer_distribution() {
+    case "${1:-}" in
+        kinetic)
+            echo "xenial"
+            return 0
+            ;;
+        melodic)
+            echo "bionic"
+            return 0
+            ;;
+        "")
+            error "undefined ros_distro"
+            return 1
+            ;;
+        *)
+            error "unknown ros_distro: $1"
+            return 1
+            ;;
+    esac
+    return 1
+}
+
+# $1 : distribution
+infer_ros_distro() {
+    case "${1:-}" in
+        xenial)
+            echo "kinetic"
+            return 0
+            ;;
+        bionic)
+            echo "melodic"
+            return 0
+            ;;
+        "")
+            error "undefined distribution"
+            return 1
+            ;;
+        *)
+            error "unknown distribution: $1"
+            return 1
+            ;;
+    esac
+    return 1
+}
+
 ################################################################################
 
 trap cleanup EXIT
@@ -514,22 +560,32 @@ fi
 if [ -n "${distribution:-}" ]; then
     info "distribution: ${distribution}"
 else
-    if ! distribution="$(infer_distribution "${release_bare}")"; then
-        die "FAILURE: infer_distribution ${release_bare}"
+    if distribution="$(infer_distribution "${ros_distro:-}")"; then
+        warning "inferred distribution for ${ros_distro}: ${distribution}"
+    else
+        if distribution="$(find_distribution "${release_bare}")"; then
+            warning "found distribution for ${release_bare}: ${distribution}"
+        else
+            die "failed to assign distribution"
+        fi
     fi
     readonly distribution="${distribution}"
-    warning "inferred distribution: ${distribution}"
 fi
 
 # ros_distro
 if [ -n "${ros_distro:-}" ]; then
     info "ros_distro: ${ros_distro}"
 else
-    if ! ros_distro="$(infer_ros_distro "${release_bare}")"; then
-        die "FAILURE: infer_ros_distro ${release_bare}"
+    if ros_distro="$(infer_ros_distro "${distribution:-}")"; then
+        warning "inferred ros_distro for ${distribution}: ${ros_distro}"
+    else
+        if ros_distro="$(find_ros_distro "${release_bare}")"; then
+            warning "found ros_distro for ${release_bare}: ${ros_distro}"
+        else
+            die "failed to assign ros_distro"
+        fi
     fi
     readonly ros_distro="${ros_distro}"
-    warning "inferred ros_distro: ${ros_distro}"
 fi
 
 # new_version
