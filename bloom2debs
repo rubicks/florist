@@ -85,6 +85,15 @@ build_catkin_pkg() {
     local issue_net="$(tr -dc '[:alnum:]' </etc/issue.net | tr '[:upper:]' '[:lower:]')"
     local release_branch="debian/${ros_distro}/${distribution}/$2"
     local release_worktree="$(mktemp -d "$(basename "$1" .git).dir.$2.XXXXXX")"
+
+    if getent hosts verdaccio.realtime.cxm >&2; then
+        if command -v npm >&2; then
+            npm config --verbose set registry http://verdaccio.realtime.cxm:4873/ >&2
+        fi
+        if command -v yarn >&2; then
+            yarn config --verbose set registry http://verdaccio.realtime.cxm:4873/ >&2
+        fi
+    fi
     (
         # This a subtle point: we're changing into a temporary directory that
         # is created WITHIN the current working directory. This causes the
