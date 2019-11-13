@@ -85,15 +85,6 @@ build_catkin_pkg() {
     local issue_net="$(tr -dc '[:alnum:]' </etc/issue.net | tr '[:upper:]' '[:lower:]')"
     local release_branch="debian/${ros_distro}/${distribution}/$2"
     local release_worktree="$(mktemp -d "$(basename "$1" .git).dir.$2.XXXXXX")"
-
-    if getent hosts verdaccio.realtime.cxm >&2; then
-        if command -v npm >&2; then
-            npm config --verbose set registry http://verdaccio.realtime.cxm:4873/ >&2
-        fi
-        if command -v yarn >&2; then
-            yarn config --verbose set registry http://verdaccio.realtime.cxm:4873/ >&2
-        fi
-    fi
     (
         # This a subtle point: we're changing into a temporary directory that
         # is created WITHIN the current working directory. This causes the
@@ -237,7 +228,6 @@ run_dockerized() {
     # https://docs.docker.com/config/containers/resource_constraints/
     docker container run \
         --cpus "$((7 + $(nproc) >> 3))" \
-        --env CONFIGURE_APT_OPTS="${CONFIGURE_APT_OPTS:-}" \
         --env DEBCONF_NONINTERACTIVE_SEEN=true \
         --env DEBIAN_FRONTEND=noninteractive \
         --env DISTRIBUTION="${distribution}" \
@@ -273,7 +263,8 @@ Acquire::http::No-Cache=True;
 Acquire::BrokenProxy=true;
 FIXBADPROXY
 
-${HERE}/scrippies/configure-apt ${CONFIGURE_APT_OPTS} ${DISTRIBUTION}
+${HERE}/scrippies/configure-apt
+${HERE}/scrippies/configure-npm
 
 # Create a apt sources list file pointing to the current working
 # directory. Rely on the luser to populate it with Debian package artifacts
