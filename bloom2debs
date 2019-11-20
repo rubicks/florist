@@ -263,7 +263,7 @@ Acquire::http::No-Cache=True;
 Acquire::BrokenProxy=true;
 FIXBADPROXY
 
-${HERE}/scrippies/configure-apt
+${HERE}/scrippies/configure-apt "${DISTRIBUTION}"
 ${HERE}/scrippies/configure-npm
 
 # Create a apt sources list file pointing to the current working
