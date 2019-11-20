@@ -75,16 +75,6 @@ run_raw() {
         warning "defaulting git config --global user.email: $(git config --global user.email)"
     fi
 
-    # `bloom-release` is stupid because it implicitly invokes `rosdep update`
-    # for you, but only _after_ it performs several **extremely**
-    # time-consuming tasks. **AND** it eats the `rosdep update` error messages
-    # because of course it does. To fail faster on a bad `rosdep`
-    # configuration, we need an explicit `rosdep update` before we attempt to
-    # bloom.
-    #
-    # -- neil 2018.12.13
-    rosdep update --verbose
-
     # `bloom-release` is stupid because it forces interactivity by reading from
     # the terminal device instead of stdin. To defeat this, we need to fight
     # stupid with stupid: use `expect` to fake the interactive terminal. If you
@@ -312,6 +302,23 @@ useradd \
     --home-dir $(mktemp -ut luser_home.XXXXXX) \
     --create-home \
     luser
+
+# `bloom-release` is stupid because it implicitly invokes `rosdep update`
+# for you, but only _after_ it performs several **extremely**
+# time-consuming tasks. **AND** it eats the `rosdep update` error messages
+# because of course it does. To fail faster on a bad `rosdep`
+# configuration, we need an explicit `rosdep update` before we attempt to
+# bloom.
+#
+# -- neil 2018.12.13
+root_home=$(getent passwd root | cut -d: -f6)
+luser_home=$(getent passwd luser | cut -d: -f6)
+if [ -d "${root_home}/.ros" ]; then
+    cp -vr ${root_home}/.ros ${luser_home}
+    chown -vR luser:luser ${luser_home}/.ros
+else
+    su -c "rosdep update --verbose" luser
+fi
 
 nice -n19 su luser - <<'EOSU'
 ${DOCKER_CMD}
