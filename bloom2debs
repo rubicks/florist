@@ -343,7 +343,7 @@ if [ -f "${pclros_config_cmake}" ]; then
 fi
 
 if command -v npm; then
-    "${HERE}/configure-npm"
+    "${HERE}/scrippies/configure-npm"
 fi
 
 nice -n19 su luser <<'SU_LUSER'
