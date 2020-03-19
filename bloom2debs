@@ -98,6 +98,9 @@ build_catkin_pkg() {
         # hates git-lfs or something
         git clone -b "${release_branch}" "file://$1" .
 
+        # because of the `--with systemd` below
+        sed -i '/^Build-Depends: /s|$|, dh-systemd|' debian/control
+
         sudo mk-build-deps \
             --install \
             --remove \
