@@ -241,15 +241,21 @@ run_dockerized() {
     docker container run \
         --cpus "$((7 + $(nproc) >> 3))" \
         --env DEBCONF_NONINTERACTIVE_SEEN=true \
+        --env DEBEMAIL="${DEBEMAIL:-}" \
+        --env DEBFULLNAME="${DEBFULLNAME:-}" \
         --env DEBIAN_FRONTEND=noninteractive \
+        --env DH_COLORS="${DH_COLORS:-never}" \
         --env DISTRIBUTION="${distribution}" \
         --env DOCKER_HOST_GID="$(id -g)" \
         --env DOCKER_HOST_UID="$(id -u)" \
+        --env DPKG_COLORS="${DPKG_COLORS:-never}" \
         --env HERE="${here}" \
         --env NEW_VERSION="${new_version}" \
+        --env NO_COLOR="${NO_COLOR:-1}" \
         --env RELEASE_BARE="${release_bare}" \
         --env ROS_DISTRO="${ros_distro}" \
         --env SAVED_ARGS="${saved_args}" \
+        --env TERM=dumb \
         --env THIS="${this}" \
         --interactive \
         --memory "$((${host_memory_k} >> 1))k" \
