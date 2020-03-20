@@ -164,7 +164,7 @@ build_catkin_pkg() {
             --git-ignore-new \
             --git-upstream-branch="${release_branch}" \
             --git-upstream-tree="${release_branch}" \
-            -j"$((7 + $(nproc) >> 3))" -us -uc --source-option='-i.*'
+            -S -j"$((7 + $(nproc) >> 3))" -us -uc --source-option='-i.*'
     )
     # Now, we're back in the current working directory, where the generated
     # Debian artifacts landed. Delete the git worktree and refresh the index
