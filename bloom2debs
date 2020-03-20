@@ -147,6 +147,15 @@ build_catkin_pkg() {
         sed -ri '/^export DH_VERBOSE=1$/aexport CXX=$(shell sh -c "command -v c++")' debian/rules
         sed -ri '/^export DH_VERBOSE=1$/aexport CC=$(shell sh -c "command -v cc")' debian/rules
 
+        # Thanks, catkin!
+        #
+        # > dpkg: error processing archive
+        # > /tmp/apt-dpkg-install-8l3BAx/520-ros-melodic-python-orocos-kdl_1.4.0-72-g57633f7-ubuntu18043lts_amd64.deb
+        # > (--unpack): trying to overwrite '/opt/ros/melodic/.catkin', which
+        # > is also in package ros-melodic-catkin
+        # > 0.7.20-1bionic.20191210.204717
+        sed -ri '/^export DH_VERBOSE=1$/aexport DH_ALWAYS_EXCLUDE=/.catkin:/.rosinstall:/_setup_util.py:/env.sh:/local_setup.bash:/local_setup.sh:/local_setup.zsh:/setup.bash:/setup.sh:/setup.zsh' debian/rules
+
         # https://github.com/ros-infrastructure/ros_buildfarm/blob/master/ros_buildfarm/sourcedeb_job.py
         gbp buildpackage \
             --git-compression-level=9 \
